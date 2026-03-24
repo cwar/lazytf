@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,7 @@ type Model struct {
 	isLoading  bool
 	loadingMsg string
 	spinner    spinner.Model
+	cancelCmd  context.CancelFunc // cancels the currently running terraform command
 
 	// Streaming output control
 	followOutput     bool              // auto-scroll to follow new streaming output
@@ -273,12 +275,15 @@ func (m *Model) runTfCmd(title string, fn func() (string, error)) tea.Cmd {
 	)
 }
 
-func (m *Model) runTfCmdStream(title string, fn func(onLine func(string)) error) tea.Cmd {
+func (m *Model) runTfCmdStream(title string, fn func(ctx context.Context, onLine func(string)) error) tea.Cmd {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelCmd = cancel
+
 	ch := make(chan string, 64)
 	var cmdErr error
 
 	go func() {
-		cmdErr = fn(func(line string) {
+		cmdErr = fn(ctx, func(line string) {
 			ch <- line
 		})
 		close(ch)
@@ -414,6 +419,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isLoading = false
 		m.loadingMsg = ""
 		m.followOutput = false
+		m.cancelCmd = nil
 
 		if msg.err != nil {
 			m.statusMsg = ui.ErrorStyle.Render("✗ " + msg.title + " failed")
@@ -643,9 +649,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.planChanges = nil
 			m.planFocusView = false
 			m.clearLastPlan() // consuming the plan — no recall needed
-			return m, m.runTfCmdStream(title, func(onLine func(string)) error {
+			return m, m.runTfCmdStream(title, func(ctx context.Context, onLine func(string)) error {
 				defer os.Remove(planFile) // clean up plan file after apply
-				return m.runner.ApplyPlanStream(planFile, onLine)
+				return m.runner.ApplyPlanStream(ctx, planFile, onLine)
 			})
 		case "esc":
 			m.savePlanState()
@@ -777,6 +783,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- Global keys ---
 	switch key {
 	case "ctrl+c":
+		if m.isLoading && m.cancelCmd != nil {
+			m.cancelCmd()
+			m.statusMsg = ui.WarningStyle.Render("⚠ Cancelling...")
+			return m, nil
+		}
 		return m, tea.Quit
 	case "q":
 		if m.planReview {
@@ -1000,8 +1011,8 @@ func (m Model) runGlobalCommand(key string) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "p":
-		return m, m.runTfCmdStream("Plan", func(onLine func(string)) error {
-			return m.runner.PlanStream(m.selectedVarFile, onLine)
+		return m, m.runTfCmdStream("Plan", func(ctx context.Context, onLine func(string)) error {
+			return m.runner.PlanStream(ctx, m.selectedVarFile, onLine)
 		})
 	case "a":
 		m.clearLastPlan()
@@ -1009,8 +1020,8 @@ func (m Model) runGlobalCommand(key string) (tea.Model, tea.Cmd) {
 		m.pendingPlanFile = planFile
 		m.planIsDestroy = false
 		varFile := m.selectedVarFile
-		return m, m.runTfCmdStream("Plan → Apply", func(onLine func(string)) error {
-			return m.runner.PlanSaveStream(varFile, planFile, false, onLine)
+		return m, m.runTfCmdStream("Plan → Apply", func(ctx context.Context, onLine func(string)) error {
+			return m.runner.PlanSaveStream(ctx, varFile, planFile, false, onLine)
 		})
 	case "i":
 		return m, m.runTfCmd("Init", func() (string, error) {
@@ -1034,8 +1045,8 @@ func (m Model) runGlobalCommand(key string) (tea.Model, tea.Cmd) {
 		m.pendingPlanFile = planFile
 		m.planIsDestroy = true
 		varFile := m.selectedVarFile
-		return m, m.runTfCmdStream("Plan → Destroy", func(onLine func(string)) error {
-			return m.runner.PlanSaveStream(varFile, planFile, true, onLine)
+		return m, m.runTfCmdStream("Plan → Destroy", func(ctx context.Context, onLine func(string)) error {
+			return m.runner.PlanSaveStream(ctx, varFile, planFile, true, onLine)
 		})
 	case "P":
 		return m, m.runTfCmd("Providers", func() (string, error) {

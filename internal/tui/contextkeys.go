@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -140,8 +141,8 @@ func (m Model) handleResourcesContextKey(key string) (tea.Model, tea.Cmd, bool) 
 				m.planIsDestroy = false
 				varFile := m.selectedVarFile
 				target := r.Address
-				return m, m.runTfCmdStream("Targeted Plan: "+r.Address, func(onLine func(string)) error {
-					return m.runner.PlanTargetSaveStream(varFile, planFile, []string{target}, onLine)
+				return m, m.runTfCmdStream("Targeted Plan: "+r.Address, func(ctx context.Context, onLine func(string)) error {
+					return m.runner.PlanTargetSaveStream(ctx, varFile, planFile, []string{target}, onLine)
 				}), true
 			}
 		}
@@ -200,8 +201,8 @@ func (m Model) handleModulesContextKey(key string) (tea.Model, tea.Cmd, bool) {
 				m.pendingPlanFile = planFile
 				m.planIsDestroy = false
 				varFile := m.selectedVarFile
-				return m, m.runTfCmdStream("Targeted Plan: "+target, func(onLine func(string)) error {
-					return m.runner.PlanTargetSaveStream(varFile, planFile, []string{target}, onLine)
+				return m, m.runTfCmdStream("Targeted Plan: "+target, func(ctx context.Context, onLine func(string)) error {
+					return m.runner.PlanTargetSaveStream(ctx, varFile, planFile, []string{target}, onLine)
 				}), true
 			}
 		}

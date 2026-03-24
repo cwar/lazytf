@@ -2,6 +2,7 @@ package terraform
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,7 +83,12 @@ type WorkspaceInfo struct {
 
 // run executes a terraform command and returns combined output.
 func (r *Runner) run(args ...string) (string, error) {
-	cmd := exec.Command(r.Binary, args...)
+	return r.runCtx(context.Background(), args...)
+}
+
+// runCtx executes a terraform command with context support for cancellation.
+func (r *Runner) runCtx(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.Binary, args...)
 	cmd.Dir = r.WorkDir
 	cmd.Env = append(os.Environ(), "TF_IN_AUTOMATION=1", "TF_CLI_ARGS=-no-color")
 	out, err := cmd.CombinedOutput()
@@ -91,7 +97,13 @@ func (r *Runner) run(args ...string) (string, error) {
 
 // runStream executes a terraform command and streams output line by line.
 func (r *Runner) runStream(onLine func(string), args ...string) error {
-	cmd := exec.Command(r.Binary, args...)
+	return r.runStreamCtx(context.Background(), onLine, args...)
+}
+
+// runStreamCtx executes a terraform command with context support, streaming
+// output line by line. When the context is cancelled, the child process is killed.
+func (r *Runner) runStreamCtx(ctx context.Context, onLine func(string), args ...string) error {
+	cmd := exec.CommandContext(ctx, r.Binary, args...)
 	cmd.Dir = r.WorkDir
 	cmd.Env = append(os.Environ(), "TF_IN_AUTOMATION=1", "TF_CLI_ARGS=-no-color")
 
@@ -129,17 +141,17 @@ func (r *Runner) Plan(varFile string) (string, error) {
 }
 
 // PlanStream runs terraform plan and streams output.
-func (r *Runner) PlanStream(varFile string, onLine func(string)) error {
+func (r *Runner) PlanStream(ctx context.Context, varFile string, onLine func(string)) error {
 	args := []string{"plan"}
 	if varFile != "" {
 		args = append(args, "-var-file="+varFile)
 	}
-	return r.runStream(onLine, args...)
+	return r.runStreamCtx(ctx, onLine, args...)
 }
 
 // PlanSaveStream runs terraform plan with -out to save a plan file, streaming output.
 // If destroy is true, adds -destroy flag for a destroy plan.
-func (r *Runner) PlanSaveStream(varFile, outFile string, destroy bool, onLine func(string)) error {
+func (r *Runner) PlanSaveStream(ctx context.Context, varFile, outFile string, destroy bool, onLine func(string)) error {
 	args := []string{"plan", "-out=" + outFile}
 	if destroy {
 		args = append(args, "-destroy")
@@ -147,12 +159,12 @@ func (r *Runner) PlanSaveStream(varFile, outFile string, destroy bool, onLine fu
 	if varFile != "" {
 		args = append(args, "-var-file="+varFile)
 	}
-	return r.runStream(onLine, args...)
+	return r.runStreamCtx(ctx, onLine, args...)
 }
 
 // PlanTargetSaveStream runs terraform plan with -target flags and -out to save
 // a plan file, streaming output. Used for targeted plan → review → apply flows.
-func (r *Runner) PlanTargetSaveStream(varFile, outFile string, targets []string, onLine func(string)) error {
+func (r *Runner) PlanTargetSaveStream(ctx context.Context, varFile, outFile string, targets []string, onLine func(string)) error {
 	args := []string{"plan", "-out=" + outFile}
 	for _, t := range targets {
 		args = append(args, "-target="+t)
@@ -160,13 +172,13 @@ func (r *Runner) PlanTargetSaveStream(varFile, outFile string, targets []string,
 	if varFile != "" {
 		args = append(args, "-var-file="+varFile)
 	}
-	return r.runStream(onLine, args...)
+	return r.runStreamCtx(ctx, onLine, args...)
 }
 
 // ApplyPlanStream runs terraform apply on a saved plan file, streaming output.
 // No -auto-approve is needed because applying a saved plan is non-interactive.
-func (r *Runner) ApplyPlanStream(planFile string, onLine func(string)) error {
-	return r.runStream(onLine, "apply", planFile)
+func (r *Runner) ApplyPlanStream(ctx context.Context, planFile string, onLine func(string)) error {
+	return r.runStreamCtx(ctx, onLine, "apply", planFile)
 }
 
 // Validate runs terraform validate.

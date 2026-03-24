@@ -110,6 +110,20 @@ type Model struct {
 	inputAction string
 }
 
+// tempPlanFile creates a unique temporary file path for saving terraform plans.
+// Uses os.CreateTemp for uniqueness, then closes/returns the path so terraform
+// can write to it. This avoids PID-based collisions between concurrent instances.
+func tempPlanFile() string {
+	f, err := os.CreateTemp("", "lazytf-*.tfplan")
+	if err != nil {
+		// Fallback — still better than nothing
+		return filepath.Join(os.TempDir(), fmt.Sprintf("lazytf-%d.tfplan", os.Getpid()))
+	}
+	path := f.Name()
+	f.Close()
+	return path
+}
+
 // NewModel creates a new TUI model.
 func NewModel(workDir string) Model {
 	s := spinner.New()
@@ -906,7 +920,7 @@ func (m Model) handleLeftKey(key string) (tea.Model, tea.Cmd) {
 		})
 	case "a":
 		m.clearLastPlan() // new plan replaces any saved plan
-		planFile := filepath.Join(os.TempDir(), fmt.Sprintf("lazytf-%d.tfplan", os.Getpid()))
+		planFile := tempPlanFile()
 		m.pendingPlanFile = planFile
 		m.planIsDestroy = false
 		varFile := m.selectedVarFile
@@ -931,7 +945,7 @@ func (m Model) handleLeftKey(key string) (tea.Model, tea.Cmd) {
 		})
 	case "D":
 		m.clearLastPlan() // new plan replaces any saved plan
-		planFile := filepath.Join(os.TempDir(), fmt.Sprintf("lazytf-%d-destroy.tfplan", os.Getpid()))
+		planFile := tempPlanFile()
 		m.pendingPlanFile = planFile
 		m.planIsDestroy = true
 		varFile := m.selectedVarFile
@@ -1008,7 +1022,7 @@ func (m Model) handleRightKey(key string) (tea.Model, tea.Cmd) {
 			})
 		case "a":
 			m.clearLastPlan() // new plan replaces any saved plan
-			planFile := filepath.Join(os.TempDir(), fmt.Sprintf("lazytf-%d.tfplan", os.Getpid()))
+			planFile := tempPlanFile()
 			m.pendingPlanFile = planFile
 			m.planIsDestroy = false
 			varFile := m.selectedVarFile

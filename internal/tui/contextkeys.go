@@ -135,7 +135,7 @@ func (m Model) handleResourcesContextKey(key string) (tea.Model, tea.Cmd, bool) 
 		if item := panel.SelectedItem(); item != nil {
 			if r, ok := item.Data.(terraform.Resource); ok {
 				m.clearLastPlan() // new plan replaces any saved plan
-				planFile := filepath.Join(os.TempDir(), fmt.Sprintf("lazytf-%d.tfplan", os.Getpid()))
+				planFile := tempPlanFile()
 				m.pendingPlanFile = planFile
 				m.planIsDestroy = false
 				varFile := m.selectedVarFile
@@ -196,7 +196,7 @@ func (m Model) handleModulesContextKey(key string) (tea.Model, tea.Cmd, bool) {
 			if mod, ok := item.Data.(terraform.ModuleCall); ok {
 				m.clearLastPlan() // new plan replaces any saved plan
 				target := "module." + mod.Name
-				planFile := filepath.Join(os.TempDir(), fmt.Sprintf("lazytf-%d.tfplan", os.Getpid()))
+				planFile := tempPlanFile()
 				m.pendingPlanFile = planFile
 				m.planIsDestroy = false
 				varFile := m.selectedVarFile

@@ -936,59 +936,7 @@ func (m Model) handleLeftKey(key string) (tea.Model, tea.Cmd) {
 	}
 
 	// Global terraform commands (work from any panel)
-	if m.isLoading && isOperationKey(key) {
-		m.statusMsg = busyMsg()
-		return m, nil
-	}
-	switch key {
-	case "p":
-		return m, m.runTfCmdStream("Plan", func(onLine func(string)) error {
-			return m.runner.PlanStream(m.selectedVarFile, onLine)
-		})
-	case "a":
-		m.clearLastPlan() // new plan replaces any saved plan
-		planFile := tempPlanFile()
-		m.pendingPlanFile = planFile
-		m.planIsDestroy = false
-		varFile := m.selectedVarFile
-		return m, m.runTfCmdStream("Plan → Apply", func(onLine func(string)) error {
-			return m.runner.PlanSaveStream(varFile, planFile, false, onLine)
-		})
-	case "i":
-		return m, m.runTfCmd("Init", func() (string, error) {
-			return m.runner.Init()
-		})
-	case "v":
-		return m, m.runTfCmd("Validate", func() (string, error) {
-			return m.runner.Validate()
-		})
-	case "f":
-		return m, m.runTfCmd("Format Check", func() (string, error) {
-			return m.runner.Fmt()
-		})
-	case "F":
-		return m, m.runTfCmd("Format Fix", func() (string, error) {
-			return m.runner.FmtFix()
-		})
-	case "D":
-		m.clearLastPlan() // new plan replaces any saved plan
-		planFile := tempPlanFile()
-		m.pendingPlanFile = planFile
-		m.planIsDestroy = true
-		varFile := m.selectedVarFile
-		return m, m.runTfCmdStream("Plan → Destroy", func(onLine func(string)) error {
-			return m.runner.PlanSaveStream(varFile, planFile, true, onLine)
-		})
-	case "P":
-		return m, m.runTfCmd("Providers", func() (string, error) {
-			return m.runner.Providers()
-		})
-	case "r":
-		m.statusMsg = ui.SpinnerLabel.Render("⟳ Refreshing...")
-		return m, m.loadAllData()
-	}
-
-	return m, nil
+	return m.runGlobalCommand(key)
 }
 
 func (m Model) handleRightKey(key string) (tea.Model, tea.Cmd) {
@@ -1036,38 +984,67 @@ func (m Model) handleRightKey(key string) (tea.Model, tea.Cmd) {
 	// Context key: edit the file currently being viewed
 	case "e":
 		return m.handleRightPaneEdit()
-
-	// Commands also work from right pane
-	case "p", "a", "i", "v":
-		if m.isLoading {
-			m.statusMsg = busyMsg()
-			return m, nil
-		}
-		switch key {
-		case "p":
-			return m, m.runTfCmdStream("Plan", func(onLine func(string)) error {
-				return m.runner.PlanStream(m.selectedVarFile, onLine)
-			})
-		case "a":
-			m.clearLastPlan() // new plan replaces any saved plan
-			planFile := tempPlanFile()
-			m.pendingPlanFile = planFile
-			m.planIsDestroy = false
-			varFile := m.selectedVarFile
-			return m, m.runTfCmdStream("Plan → Apply", func(onLine func(string)) error {
-				return m.runner.PlanSaveStream(varFile, planFile, false, onLine)
-			})
-		case "i":
-			return m, m.runTfCmd("Init", func() (string, error) {
-				return m.runner.Init()
-			})
-		case "v":
-			return m, m.runTfCmd("Validate", func() (string, error) {
-				return m.runner.Validate()
-			})
-		}
 	}
 
+	// Global terraform commands also work from the right pane
+	return m.runGlobalCommand(key)
+}
+
+// runGlobalCommand dispatches terraform commands that work from any context
+// (left panels or right detail pane). Returns (m, nil) if the key is not
+// a recognised command.
+func (m Model) runGlobalCommand(key string) (tea.Model, tea.Cmd) {
+	if m.isLoading && isOperationKey(key) {
+		m.statusMsg = busyMsg()
+		return m, nil
+	}
+	switch key {
+	case "p":
+		return m, m.runTfCmdStream("Plan", func(onLine func(string)) error {
+			return m.runner.PlanStream(m.selectedVarFile, onLine)
+		})
+	case "a":
+		m.clearLastPlan()
+		planFile := tempPlanFile()
+		m.pendingPlanFile = planFile
+		m.planIsDestroy = false
+		varFile := m.selectedVarFile
+		return m, m.runTfCmdStream("Plan → Apply", func(onLine func(string)) error {
+			return m.runner.PlanSaveStream(varFile, planFile, false, onLine)
+		})
+	case "i":
+		return m, m.runTfCmd("Init", func() (string, error) {
+			return m.runner.Init()
+		})
+	case "v":
+		return m, m.runTfCmd("Validate", func() (string, error) {
+			return m.runner.Validate()
+		})
+	case "f":
+		return m, m.runTfCmd("Format Check", func() (string, error) {
+			return m.runner.Fmt()
+		})
+	case "F":
+		return m, m.runTfCmd("Format Fix", func() (string, error) {
+			return m.runner.FmtFix()
+		})
+	case "D":
+		m.clearLastPlan()
+		planFile := tempPlanFile()
+		m.pendingPlanFile = planFile
+		m.planIsDestroy = true
+		varFile := m.selectedVarFile
+		return m, m.runTfCmdStream("Plan → Destroy", func(onLine func(string)) error {
+			return m.runner.PlanSaveStream(varFile, planFile, true, onLine)
+		})
+	case "P":
+		return m, m.runTfCmd("Providers", func() (string, error) {
+			return m.runner.Providers()
+		})
+	case "r":
+		m.statusMsg = ui.SpinnerLabel.Render("⟳ Refreshing...")
+		return m, m.loadAllData()
+	}
 	return m, nil
 }
 

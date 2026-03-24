@@ -340,7 +340,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.highlightedLines = append(m.highlightedLines, m.planHighlighter.HighlightLine(msg.line))
 		// Auto-scroll to follow output (unless user scrolled up)
 		if m.followOutput {
-			visH := m.height - 4
+			visH := m.detailVisibleHeight()
 			if visH < 1 {
 				visH = 1
 			}
@@ -573,7 +573,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.onSelectionChangedCmd()
 		case "j", "down":
 			m.detailScroll++
-			visH := m.height - 4
+			visH := m.detailVisibleHeight()
 			max := len(m.detailLines) - visH
 			if max < 0 {
 				max = 0
@@ -591,7 +591,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailScroll = 0
 			return m, nil
 		case "G":
-			visH := m.height - 4
+			visH := m.detailVisibleHeight()
 			max := len(m.detailLines) - visH
 			if max < 0 {
 				max = 0
@@ -600,7 +600,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "d", "ctrl+d":
 			m.detailScroll += 15
-			visH := m.height - 4
+			visH := m.detailVisibleHeight()
 			max := len(m.detailLines) - visH
 			if max < 0 {
 				max = 0
@@ -833,7 +833,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Right pane: go to bottom
-		max := len(m.detailLines) - (m.height - 6)
+		visH := m.detailVisibleHeight()
+		max := len(m.detailLines) - visH
 		if max < 0 {
 			max = 0
 		}
@@ -991,7 +992,8 @@ func (m Model) handleLeftKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleRightKey(key string) (tea.Model, tea.Cmd) {
-	maxScroll := len(m.detailLines) - (m.height - 6)
+	visH := m.detailVisibleHeight()
+	maxScroll := len(m.detailLines) - visH
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
@@ -1225,7 +1227,7 @@ func (m *Model) recomputeCompactDiff() {
 // planFocusMaxScroll returns the max scroll value for the current view
 // (focused block or full plan), accounting for compact diff.
 func (m *Model) planFocusMaxScroll() int {
-	visH := m.height - 6
+	visH := m.detailVisibleHeight()
 	if visH < 1 {
 		visH = 1
 	}
@@ -1236,6 +1238,18 @@ func (m *Model) planFocusMaxScroll() int {
 		max = 0
 	}
 	return max
+}
+
+// detailVisibleHeight returns the number of content lines visible in the
+// detail pane. The layout is: contentH = m.height - 2 (status + help),
+// and renderDetailPane uses 2 lines for the title bar and bottom padding,
+// leaving contentH - 2 = m.height - 4 visible lines.
+func (m *Model) detailVisibleHeight() int {
+	h := m.height - 4
+	if h < 1 {
+		return 1
+	}
+	return h
 }
 
 // ─── Selection Changed ───────────────────────────────────

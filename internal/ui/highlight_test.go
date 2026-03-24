@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -298,13 +299,13 @@ func BenchmarkHighlightHCL(b *testing.B) {
 	// Generate a realistic-sized HCL file
 	var sb strings.Builder
 	for i := 0; i < 100; i++ {
-		sb.WriteString(`resource "aws_instance" "web` + itoa(i) + `" {
+		sb.WriteString(`resource "aws_instance" "web` + strconv.Itoa(i) + `" {
   ami           = "ami-12345678"
   instance_type = "t2.micro"
-  count         = ` + itoa(i) + `
+  count         = ` + strconv.Itoa(i) + `
   
   tags = {
-    Name        = "web-${var.environment}-` + itoa(i) + `"
+    Name        = "web-${var.environment}-` + strconv.Itoa(i) + `"
     Environment = var.environment
     ManagedBy   = "terraform"
   }

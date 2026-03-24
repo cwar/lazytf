@@ -2,6 +2,7 @@ package terraform
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -345,23 +346,24 @@ func (g *Graph) Summary() string {
 	var parts []string
 	for _, t := range []string{"resource", "data", "module", "var", "output"} {
 		if c := counts[t]; c > 0 {
-			parts = append(parts, strings.Title(t)+": "+itoa(c))
+			parts = append(parts, titleCase(t)+": "+strconv.Itoa(c))
 		}
 	}
 	edges := 0
 	for _, node := range g.Nodes {
 		edges += len(node.DepsOn)
 	}
-	parts = append(parts, "Edges: "+itoa(edges))
+	parts = append(parts, "Edges: "+strconv.Itoa(edges))
 	return strings.Join(parts, "  │  ")
 }
 
-func itoa(n int) string {
-	if n < 0 {
-		return "-" + itoa(-n)
+// titleCase capitalises the first byte of an ASCII string.
+func titleCase(s string) string {
+	if len(s) == 0 {
+		return s
 	}
-	if n < 10 {
-		return string(rune('0' + n))
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-32) + s[1:]
 	}
-	return itoa(n/10) + string(rune('0'+n%10))
+	return s
 }

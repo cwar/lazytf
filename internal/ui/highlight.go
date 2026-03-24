@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -142,7 +143,7 @@ func HighlightHCL(source string, showLineNumbers bool) []string {
 	for i, line := range rawLines {
 		var prefix string
 		if showLineNumbers {
-			num := HclLineNum.Render(strings.Repeat(" ", 4-numWidth(i+1)) + itoa(i+1))
+			num := HclLineNum.Render(strings.Repeat(" ", 4-numWidth(i+1)) + strconv.Itoa(i+1))
 			sep := HclLineNumSep.Render(" │ ")
 			prefix = num + sep
 		}
@@ -433,16 +434,6 @@ func numWidth(n int) int {
 		return 4
 	}
 	return 5
-}
-
-func itoa(n int) string {
-	if n < 0 {
-		return "-" + itoa(-n)
-	}
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	return itoa(n/10) + string(rune('0'+n%10))
 }
 
 // HighlightTfContent highlights terraform file content and returns

@@ -172,6 +172,7 @@ type dataLoadedMsg struct {
 	workspaces *terraform.WorkspaceInfo
 	outputs    []terraform.Output
 	gitBranch  string
+	errors     []string // non-fatal load errors to surface in the status bar
 }
 
 type cmdStartMsg struct {
@@ -208,12 +209,30 @@ type graphLoadedMsg struct {
 
 func (m *Model) loadAllData() tea.Cmd {
 	return func() tea.Msg {
-		files, _ := m.runner.ListFiles()
-		resources, _ := m.runner.StateList()
-		modules, _ := m.runner.ParseModules()
-		workspaces, _ := m.runner.Workspaces()
-		outputs, _ := m.runner.Outputs()
+		var errs []string
+
+		files, err := m.runner.ListFiles()
+		if err != nil {
+			errs = append(errs, "files: "+err.Error())
+		}
+		resources, err := m.runner.StateList()
+		if err != nil {
+			errs = append(errs, "state: "+err.Error())
+		}
+		modules, err := m.runner.ParseModules()
+		if err != nil {
+			errs = append(errs, "modules: "+err.Error())
+		}
+		workspaces, err := m.runner.Workspaces()
+		if err != nil {
+			errs = append(errs, "workspaces: "+err.Error())
+		}
+		outputs, err := m.runner.Outputs()
+		if err != nil {
+			errs = append(errs, "outputs: "+err.Error())
+		}
 		gitBranch := detectGitBranch(m.workDir)
+
 		return dataLoadedMsg{
 			files:      files,
 			resources:  resources,
@@ -221,6 +240,7 @@ func (m *Model) loadAllData() tea.Cmd {
 			workspaces: workspaces,
 			outputs:    outputs,
 			gitBranch:  gitBranch,
+			errors:     errs,
 		}
 	}
 }
@@ -343,6 +363,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileTree = terraform.BuildFileTree(m.files)
 		m.autoSelectVarFile()
 		m.rebuildAllPanels()
+
+		// Surface any load errors in the status bar
+		if len(msg.errors) > 0 {
+			m.statusMsg = ui.ErrorStyle.Render("⚠ Load errors: " + strings.Join(msg.errors, "; "))
+		}
+
 		// Don't overwrite the detail pane if we're showing apply/destroy output
 		if !m.applyResult {
 			m.onSelectionChanged()

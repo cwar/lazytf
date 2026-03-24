@@ -12,6 +12,64 @@ var FoldMarkerStyle = lipgloss.NewStyle().
 	Foreground(DimGray).
 	Italic(true)
 
+// computeKeepMask classifies each line and returns a boolean mask indicating
+// which lines to keep. Lines outside heredocs are always kept. Inside
+// heredocs, only diff lines (+/-/~) and `context` surrounding lines are kept,
+// plus the first and last line of each heredoc span for readability.
+func computeKeepMask(lines []string, context int) []bool {
+	h := NewPlanHighlighter()
+	kinds := make([]PlanLineKind, len(lines))
+	inHeredoc := make([]bool, len(lines))
+
+	for i, line := range lines {
+		kinds[i] = h.ClassifyLine(line)
+		inHeredoc[i] = h.inHeredoc
+	}
+
+	keep := make([]bool, len(lines))
+	for i := range lines {
+		if !inHeredoc[i] {
+			keep[i] = true
+			continue
+		}
+		if kinds[i] == PlanLineAdd || kinds[i] == PlanLineDestroy || kinds[i] == PlanLineChange {
+			lo := i - context
+			if lo < 0 {
+				lo = 0
+			}
+			hi := i + context
+			if hi >= len(lines) {
+				hi = len(lines) - 1
+			}
+			for j := lo; j <= hi; j++ {
+				keep[j] = true
+			}
+		}
+	}
+
+	// Keep heredoc boundary lines for readability
+	for i := range lines {
+		if inHeredoc[i] {
+			if i == 0 || !inHeredoc[i-1] {
+				keep[i] = true
+			}
+			if i == len(lines)-1 || !inHeredoc[i+1] {
+				keep[i] = true
+			}
+		}
+	}
+
+	return keep
+}
+
+// foldMarker builds a styled "··· N lines hidden ···" string aligned with
+// the surrounding code indentation.
+func foldMarker(lines []string, foldStart, foldEnd, hidden int) string {
+	indent := estimateIndent(lines, foldStart, foldEnd)
+	return fmt.Sprintf("%s%s", indent,
+		FoldMarkerStyle.Render(fmt.Sprintf("··· %d lines hidden ···", hidden)))
+}
+
 // CompactDiff collapses unchanged runs inside heredoc blocks, keeping
 // `context` lines of context around each actual change (+/-/~).
 // Lines outside heredocs are always preserved.
@@ -25,66 +83,8 @@ func CompactDiff(lines []string, context int) []string {
 		context = 0
 	}
 
-	// Phase 1: classify every line and track heredoc spans
-	h := NewPlanHighlighter()
-	kinds := make([]PlanLineKind, len(lines))
-	inHeredoc := make([]bool, len(lines))
+	keep := computeKeepMask(lines, context)
 
-	for i, line := range lines {
-		kinds[i] = h.ClassifyLine(line)
-		inHeredoc[i] = h.inHeredoc
-		// Also mark heredoc start/end lines
-		// The line that opens the heredoc (<<-EOT) is NOT in the heredoc per
-		// the highlighter (it enters heredoc AFTER classifying), but we still
-		// want to keep it. Similarly the EOT line exits heredoc.
-	}
-
-	// Phase 2: mark lines as "keep" — everything outside heredocs, plus
-	// diff lines and context within heredocs
-	keep := make([]bool, len(lines))
-
-	for i := range lines {
-		if !inHeredoc[i] {
-			// Outside heredoc: always keep (attributes, resource headers, etc.)
-			keep[i] = true
-			continue
-		}
-		// Inside heredoc: keep if it's a diff line
-		if kinds[i] == PlanLineAdd || kinds[i] == PlanLineDestroy || kinds[i] == PlanLineChange {
-			// Mark this line and surrounding context
-			lo := i - context
-			if lo < 0 {
-				lo = 0
-			}
-			hi := i + context
-			if hi >= len(lines) {
-				hi = len(lines) - 1
-			}
-			for j := lo; j <= hi; j++ {
-				keep[j] = true
-			}
-		}
-	}
-
-	// Also keep the first and last line of each heredoc (the <<-EOT and EOT lines)
-	// These are classified outside the heredoc by the highlighter, so they're
-	// already kept. But ensure the first few and last few heredoc content lines
-	// are also kept for readability.
-	// Find heredoc boundaries and keep 1 line at each end.
-	for i := range lines {
-		if inHeredoc[i] {
-			// First line of a heredoc span
-			if i == 0 || !inHeredoc[i-1] {
-				keep[i] = true
-			}
-			// Last line of a heredoc span
-			if i == len(lines)-1 || !inHeredoc[i+1] {
-				keep[i] = true
-			}
-		}
-	}
-
-	// Phase 3: build output, replacing collapsed runs with fold markers
 	var result []string
 	i := 0
 	for i < len(lines) {
@@ -93,22 +93,12 @@ func CompactDiff(lines []string, context int) []string {
 			i++
 			continue
 		}
-
-		// Start of a collapsed run — count how many lines to skip
 		foldStart := i
 		for i < len(lines) && !keep[i] {
 			i++
 		}
-		hidden := i - foldStart
-
-		// Insert a fold marker
-		// Use indentation matching the surrounding content for visual alignment
-		indent := estimateIndent(lines, foldStart, i)
-		marker := fmt.Sprintf("%s%s", indent,
-			FoldMarkerStyle.Render(fmt.Sprintf("··· %d lines hidden ···", hidden)))
-		result = append(result, marker)
+		result = append(result, foldMarker(lines, foldStart, i, i-foldStart))
 	}
-
 	return result
 }
 
@@ -120,59 +110,14 @@ func CompactDiffHighlighted(lines, highlighted []string, context int) ([]string,
 		return nil, nil
 	}
 	if len(highlighted) != len(lines) {
-		// Fall back to just compacting raw lines if lengths mismatch
 		return CompactDiff(lines, context), nil
 	}
 	if context < 0 {
 		context = 0
 	}
 
-	// Phase 1: classify every line and track heredoc spans
-	h := NewPlanHighlighter()
-	kinds := make([]PlanLineKind, len(lines))
-	inHeredoc := make([]bool, len(lines))
+	keep := computeKeepMask(lines, context)
 
-	for i, line := range lines {
-		kinds[i] = h.ClassifyLine(line)
-		inHeredoc[i] = h.inHeredoc
-	}
-
-	// Phase 2: mark lines as "keep"
-	keep := make([]bool, len(lines))
-
-	for i := range lines {
-		if !inHeredoc[i] {
-			keep[i] = true
-			continue
-		}
-		if kinds[i] == PlanLineAdd || kinds[i] == PlanLineDestroy || kinds[i] == PlanLineChange {
-			lo := i - context
-			if lo < 0 {
-				lo = 0
-			}
-			hi := i + context
-			if hi >= len(lines) {
-				hi = len(lines) - 1
-			}
-			for j := lo; j <= hi; j++ {
-				keep[j] = true
-			}
-		}
-	}
-
-	// Keep heredoc boundary lines
-	for i := range lines {
-		if inHeredoc[i] {
-			if i == 0 || !inHeredoc[i-1] {
-				keep[i] = true
-			}
-			if i == len(lines)-1 || !inHeredoc[i+1] {
-				keep[i] = true
-			}
-		}
-	}
-
-	// Phase 3: build output for both raw and highlighted
 	var rawResult, hlResult []string
 	i := 0
 	for i < len(lines) {
@@ -182,20 +127,14 @@ func CompactDiffHighlighted(lines, highlighted []string, context int) ([]string,
 			i++
 			continue
 		}
-
 		foldStart := i
 		for i < len(lines) && !keep[i] {
 			i++
 		}
-		hidden := i - foldStart
-
-		indent := estimateIndent(lines, foldStart, i)
-		marker := fmt.Sprintf("%s%s", indent,
-			FoldMarkerStyle.Render(fmt.Sprintf("··· %d lines hidden ···", hidden)))
+		marker := foldMarker(lines, foldStart, i, i-foldStart)
 		rawResult = append(rawResult, marker)
 		hlResult = append(hlResult, marker)
 	}
-
 	return rawResult, hlResult
 }
 

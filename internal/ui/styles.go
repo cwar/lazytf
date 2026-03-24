@@ -1,10 +1,6 @@
 package ui
 
-import (
-	"strings"
-
-	"github.com/charmbracelet/lipgloss"
-)
+import "github.com/charmbracelet/lipgloss"
 
 // Color palette — inspired by lazygit's purple/magenta theme
 // with terraform-specific accent colors.
@@ -145,33 +141,6 @@ var (
 		Bold(true)
 )
 
-// HighlightPlanLine applies color to a terraform plan output line.
-// Deprecated: Use PlanHighlighter.HighlightLine instead, which is
-// heredoc-aware and won't miscolor YAML list items as removals.
-func HighlightPlanLine(line string) string {
-	trimmed := line
-	for len(trimmed) > 0 && trimmed[0] == ' ' {
-		trimmed = trimmed[1:]
-	}
 
-	switch {
-	case len(trimmed) > 0 && trimmed[0] == '+':
-		return PlanAdd.Render(line)
-	case len(trimmed) > 0 && trimmed[0] == '-':
-		return PlanDestroy.Render(line)
-	case len(trimmed) > 0 && trimmed[0] == '~':
-		return PlanChange.Render(line)
-	case strings.Contains(line, "Plan:"):
-		return PlanInfo.Render(line)
-	case strings.Contains(line, "No changes"):
-		return SuccessStyle.Render(line)
-	case strings.Contains(line, "Error"):
-		return ErrorStyle.Render(line)
-	case strings.Contains(line, "Warning"):
-		return WarningStyle.Render(line)
-	default:
-		return line
-	}
-}
 
 

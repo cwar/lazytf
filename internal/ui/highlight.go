@@ -663,9 +663,8 @@ func extractHeredocMarker(line string) string {
 	return ""
 }
 
-// HighlightPlanOutput highlights terraform plan output with richer
-// analysis than the basic HighlightPlanLine. Uses PlanHighlighter
-// internally for heredoc-aware diff detection.
+// HighlightPlanOutput highlights terraform plan output using a fresh
+// PlanHighlighter for heredoc-aware diff detection.
 func HighlightPlanOutput(output string) []string {
 	lines := strings.Split(output, "\n")
 	result := make([]string, len(lines))

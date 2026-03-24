@@ -54,7 +54,7 @@ type TfFile struct {
 // Output represents a terraform output value.
 type Output struct {
 	Name      string
-	Value     interface{}
+	Value     any
 	Type      string
 	Sensitive bool
 }
@@ -262,9 +262,9 @@ func (r *Runner) Outputs() ([]Output, error) {
 	}
 
 	var raw map[string]struct {
-		Value     interface{} `json:"value"`
-		Type      interface{} `json:"type"`
-		Sensitive bool        `json:"sensitive"`
+		Value     any  `json:"value"`
+		Type      any  `json:"type"`
+		Sensitive bool `json:"sensitive"`
 	}
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
 		return nil, err

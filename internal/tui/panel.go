@@ -50,7 +50,7 @@ type SubPanel struct {
 // PanelItem is a single selectable item in a sub-panel.
 type PanelItem struct {
 	Label string      // display text
-	Data  interface{} // associated object
+	Data  any // associated object
 	Icon  string      // optional prefix icon
 }
 

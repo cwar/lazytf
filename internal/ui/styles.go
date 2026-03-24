@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Color palette — inspired by lazygit's purple/magenta theme
 // with terraform-specific accent colors.
@@ -157,28 +161,17 @@ func HighlightPlanLine(line string) string {
 		return PlanDestroy.Render(line)
 	case len(trimmed) > 0 && trimmed[0] == '~':
 		return PlanChange.Render(line)
-	case contains(line, "Plan:"):
+	case strings.Contains(line, "Plan:"):
 		return PlanInfo.Render(line)
-	case contains(line, "No changes"):
+	case strings.Contains(line, "No changes"):
 		return SuccessStyle.Render(line)
-	case contains(line, "Error"):
+	case strings.Contains(line, "Error"):
 		return ErrorStyle.Render(line)
-	case contains(line, "Warning"):
+	case strings.Contains(line, "Warning"):
 		return WarningStyle.Render(line)
 	default:
 		return line
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && findSubstring(s, substr)
-}
 
-func findSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}

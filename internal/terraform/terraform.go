@@ -18,6 +18,8 @@ type Runner struct {
 }
 
 // NewRunner creates a Runner, auto-detecting tofu vs terraform.
+// Returns a Runner even if no binary is found — commands will fail
+// gracefully with a descriptive error rather than panicking.
 func NewRunner(workDir string) *Runner {
 	binary := "terraform"
 	if _, err := exec.LookPath("tofu"); err == nil {
@@ -26,6 +28,19 @@ func NewRunner(workDir string) *Runner {
 		if _, err := os.Stat(filepath.Join(workDir, ".terraform")); err != nil {
 			binary = "tofu"
 		}
+	}
+	// Verify the chosen binary exists on $PATH
+	if _, err := exec.LookPath(binary); err != nil {
+		// Try the other one
+		alt := "tofu"
+		if binary == "tofu" {
+			alt = "terraform"
+		}
+		if _, err := exec.LookPath(alt); err == nil {
+			binary = alt
+		}
+		// If neither exists, keep the default — commands will fail with a
+		// clear "executable file not found" error rather than a panic.
 	}
 	return &Runner{WorkDir: workDir, Binary: binary}
 }

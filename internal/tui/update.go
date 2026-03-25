@@ -107,6 +107,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadAllData()
 
+	case initFinishedMsg:
+		// Reload data after init (providers, modules, state may have changed)
+		if msg.err != nil {
+			m.statusMsg = ui.ErrorStyle.Render("Init failed — check output above")
+		} else {
+			m.statusMsg = ui.SuccessStyle.Render("✓ Init complete")
+		}
+		return m, m.loadAllData()
+
 	case multiWSPlanDoneMsg:
 		m.handleMultiWSPlanDone(msg)
 		return m, nil

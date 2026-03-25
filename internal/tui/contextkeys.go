@@ -17,6 +17,11 @@ import (
 // editorFinishedMsg is sent when an external editor process exits.
 type editorFinishedMsg struct{ err error }
 
+// initFinishedMsg is sent when an interactive terraform init process exits.
+// Init runs via tea.ExecProcess so that Git credential prompts, SSH agent
+// passphrase dialogs, and other interactive auth flows work correctly.
+type initFinishedMsg struct{ err error }
+
 // keyHint represents a key-description pair for help display.
 type keyHint struct {
 	Key  string

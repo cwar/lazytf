@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cwar/lazytf/internal/terraform"
@@ -455,8 +456,15 @@ func (m Model) runGlobalCommand(key string) (tea.Model, tea.Cmd) {
 			return m.runner.PlanSaveStream(ctx, varFile, planFile, false, onLine)
 		})
 	case "i":
-		return m, m.runTfCmd("Init", func(ctx context.Context) (string, error) {
-			return m.runner.RunCtx(ctx, "init")
+		// Init runs interactively via tea.ExecProcess so Git credential
+		// prompts, SSH agent dialogs, and other auth flows work. The TUI
+		// suspends, terraform gets the real terminal, and we resume + reload
+		// data when it exits.
+		cmd := exec.Command(m.runner.Binary, "init")
+		cmd.Dir = m.runner.WorkDir
+		m.statusMsg = ui.SpinnerLabel.Render("⟳ Running init (switched to terminal)…")
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return initFinishedMsg{err: err}
 		})
 	case "v":
 		return m, m.runTfCmd("Validate", func(ctx context.Context) (string, error) {

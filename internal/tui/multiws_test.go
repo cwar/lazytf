@@ -9,6 +9,19 @@ import (
 	"github.com/cwar/lazytf/internal/terraform"
 )
 
+// startAndConfirmMultiWS opens the picker and immediately confirms all selected
+// workspaces. Use this in tests that need items populated (the old startMultiWS
+// behavior before the picker was added).
+func startAndConfirmMultiWS(m *Model, filter string) tea.Cmd {
+	m.startMultiWS(filter)
+	if m.multiWS.phase != "selecting" {
+		return nil // no workspaces matched, error already set
+	}
+	result, cmd := m.confirmMultiWSPicker()
+	*m = result.(Model)
+	return cmd
+}
+
 // multiWSModel builds a Model with workspaces and config for testing multi-ws.
 func multiWSModel(workspaces []string, ignoredWS []string, groups map[string]string) Model {
 	m := testModel()
@@ -68,7 +81,7 @@ func TestMultiWS_StartFiltersIgnored(t *testing.T) {
 	)
 
 	// Simulate submitting empty filter (all workspaces)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	if !m.multiWS.active {
 		t.Fatal("expected multi-ws mode to be active")
@@ -92,7 +105,7 @@ func TestMultiWS_StartWithFilter(t *testing.T) {
 		nil,
 	)
 
-	m.startMultiWS("dev")
+	startAndConfirmMultiWS(&m, "dev")
 
 	if !m.multiWS.active {
 		t.Fatal("expected multi-ws mode to be active")
@@ -115,7 +128,7 @@ func TestMultiWS_StartWithGroupFilter(t *testing.T) {
 		map[string]string{"dev": "dev-"}, // group "dev" → filter "dev-"
 	)
 
-	m.startMultiWS("dev")
+	startAndConfirmMultiWS(&m, "dev")
 
 	// "dev" resolves to "dev-" via group, so only dev-gew4 and dev-gae2 match
 	names := make([]string, len(m.multiWS.items))
@@ -134,7 +147,7 @@ func TestMultiWS_StartNoMatch(t *testing.T) {
 		nil,
 	)
 
-	m.startMultiWS("staging")
+	startAndConfirmMultiWS(&m, "staging")
 
 	if m.multiWS.active {
 		t.Fatal("should not activate with no matching workspaces")
@@ -157,7 +170,7 @@ func TestMultiWS_VarFileMatching(t *testing.T) {
 		{Name: "prod-gew4.tfvars", Path: "/tmp/prod-gew4.tfvars", IsVars: true},
 	}
 
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Check var files are matched
 	for _, item := range m.multiWS.items {
@@ -180,7 +193,7 @@ func TestMultiWS_PlanDone_Success(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Simulate plan completion
 	output := "No changes. Your infrastructure matches the configuration."
@@ -205,7 +218,7 @@ func TestMultiWS_PlanDone_WithChanges(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	output := `
 Terraform will perform the following actions:
@@ -241,7 +254,7 @@ func TestMultiWS_PlanDone_Failure(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{
 		workspace: "dev-gew4",
@@ -261,7 +274,7 @@ func TestMultiWS_KeyNavigation(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Start at 0
 	if m.multiWS.cursor != 0 {
@@ -305,7 +318,7 @@ func TestMultiWS_JKScrollsOutput(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Add long output so there's something to scroll
 	longOutput := strings.Repeat("line\n", 100)
@@ -332,7 +345,7 @@ func TestMultiWS_EscCloses(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	if !m.multiWS.active {
 		t.Fatal("expected active")
@@ -352,7 +365,7 @@ func TestMultiWS_QCloses(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	m = result.(Model)
@@ -368,7 +381,7 @@ func TestMultiWS_AllPhaseTransitions(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Initial phase and status
 	if m.multiWS.phase != "planning" {
@@ -491,7 +504,7 @@ func TestMultiWS_FocusMode_Toggle(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	planOutput := `Terraform will perform the following actions:
 
@@ -538,7 +551,7 @@ func TestMultiWS_FocusMode_ResourceNav(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	planOutput := `Terraform will perform the following actions:
 
@@ -594,7 +607,7 @@ func TestMultiWS_FocusMode_NoChangesIgnored(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Plan with no changes
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{
@@ -616,7 +629,7 @@ func TestMultiWS_FocusMode_RenderTitle(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	planOutput := `Terraform will perform the following actions:
 
@@ -679,7 +692,7 @@ func TestMultiWS_CompactDiff_ZKeyToggles(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: multiWSPlanOutput()})
 
 	// z toggles compact on
@@ -706,7 +719,7 @@ func TestMultiWS_CompactDiff_ViewLinesChange(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: multiWSPlanOutput()})
 
 	item := m.multiWSSelectedItem()
@@ -741,7 +754,7 @@ func TestMultiWS_CompactDiff_SurvivesWorkspaceSwitch(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: multiWSPlanOutput()})
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gae2", output: multiWSPlanOutput()})
 
@@ -782,7 +795,7 @@ func TestMultiWS_CompactDiff_WithFocusMode(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: multiWSPlanOutput()})
 
 	// Enable focus mode first
@@ -811,7 +824,7 @@ func TestMultiWS_CompactDiff_HelpHintShowsZ(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.multiWS.phase = "reviewing"
 
 	help := m.renderMultiWSHelp()
@@ -943,7 +956,7 @@ func TestMultiWS_SkipApplyExcludedFromMultiWS(t *testing.T) {
 	)
 	m.config.SkipApplyWorkspaces = []string{"prod-gew4"}
 
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// prod-gew4 should not appear at all — it's skipped
 	for _, item := range m.multiWS.items {
@@ -964,7 +977,7 @@ func TestMultiWS_SkipApplyNotPlanned(t *testing.T) {
 	)
 	m.config.SkipApplyWorkspaces = []string{"prod-gew4"}
 
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Only dev-gew4 should be planned
 	if len(m.multiWS.items) != 1 {
@@ -983,7 +996,7 @@ func TestMultiWS_SkipApplyAllExcluded(t *testing.T) {
 	)
 	m.config.SkipApplyWorkspaces = []string{"dev-gew4"}
 
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	if m.multiWS.active {
 		t.Error("should not activate multi-ws when all workspaces are excluded")
@@ -1075,7 +1088,7 @@ func TestChangeBadges_ShowsInRenderedList(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	planOutput := `Terraform will perform the following actions:
 
@@ -1152,7 +1165,7 @@ func TestMultiWS_PrepareItemForApply_SetsCursor(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Simulate plans completing
 	for _, item := range m.multiWS.items {
@@ -1184,7 +1197,7 @@ func TestMultiWS_PrepareItemForApply_AddsSeparator(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	planOutput := "Plan: 1 to add, 0 to change, 0 to destroy."
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: planOutput})
@@ -1216,7 +1229,7 @@ func TestMultiWS_PrepareItemForApply_SetsFollowApply(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{
 		workspace: "dev-gew4",
 		output:    "Plan: 1 to add, 0 to change, 0 to destroy.\n# aws_instance.web will be created",
@@ -1238,7 +1251,7 @@ func TestMultiWS_PrepareItemForApply_ResetsViewState(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{
 		workspace: "dev-gew4",
 		output: `Terraform will perform the following actions:
@@ -1271,7 +1284,7 @@ func TestMultiWS_HandleApplyLine_AppendsOutput(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: "Plan: 1 to add."})
 	m.prepareItemForApply(0)
 
@@ -1301,7 +1314,7 @@ func TestMultiWS_HandleApplyLine_AutoScrolls(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: "Plan: 1 to add."})
 	m.prepareItemForApply(0)
 
@@ -1331,7 +1344,7 @@ func TestMultiWS_ScrollUpDisablesFollow(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: strings.Repeat("line\n", 50)})
 	m.prepareItemForApply(0)
 	m.multiWS.scroll = 10 // pretend we're scrolled down
@@ -1355,7 +1368,7 @@ func TestMultiWS_ScrollToBottomReenablesFollow(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: strings.Repeat("line\n", 50)})
 	m.prepareItemForApply(0)
 	m.multiWS.followApply = false
@@ -1375,7 +1388,7 @@ func TestMultiWS_ApplyDone_UpdatesStatus(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: "Plan: 1 to add."})
 	m.prepareItemForApply(0)
 	m.multiWS.followApply = true
@@ -1397,7 +1410,7 @@ func TestMultiWS_ApplyDone_Failure(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: "Plan: 1 to add."})
 	m.prepareItemForApply(0)
 
@@ -1418,7 +1431,7 @@ func TestMultiWS_DetailTitle_ShowsApplying(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{
 		workspace: "dev-gew4",
 		output:    "Plan: 1 to add, 0 to change, 0 to destroy.\n# aws_instance.web will be created",
@@ -1437,7 +1450,7 @@ func TestMultiWS_DetailTitle_ShowsApplied(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: "Plan: 1 to add."})
 	m.prepareItemForApply(0)
 	m.handleMultiWSApplyDone(multiWSApplyDoneMsg{workspace: "dev-gew4"})
@@ -1455,7 +1468,7 @@ func TestMultiWS_SequentialApply_CursorFollows(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Complete plans for both
 	for _, item := range m.multiWS.items {
@@ -1501,7 +1514,7 @@ func TestMultiWS_ApplyLine_WrongWorkspaceIgnored(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: "Plan: 1 to add."})
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gae2", output: "Plan: 1 to add."})
 	m.prepareItemForApply(0)
@@ -1525,7 +1538,7 @@ func TestMultiWS_YKeyStartsApply(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{
 		workspace: "dev-gew4",
 		output:    "Plan: 1 to add, 0 to change, 0 to destroy.\n# aws_instance.web will be created",
@@ -1554,7 +1567,7 @@ func TestMultiWS_RenderDoesNotPanic(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Simulate plan completion for one workspace
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{
@@ -1581,7 +1594,7 @@ func TestMultiWS_DetailScrolling(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Add lots of output (use non-refresh lines so they aren't collapsed)
 	longOutput := strings.Repeat("  + resource line\n", 100)
@@ -1613,7 +1626,7 @@ func TestMultiWS_ZKeyTogglesCompactDiff(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	planOutput := `Terraform will perform the following actions:
 
@@ -1661,7 +1674,7 @@ func TestMultiWS_CompactDiffRecomputesOnWorkspaceSwitch(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Complete plans for both workspaces
 	planOutput1 := `  # aws_instance.web will be created
@@ -1704,7 +1717,7 @@ func TestMultiWS_CompactDiffHintShown(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 	m.handleMultiWSPlanDone(multiWSPlanDoneMsg{workspace: "dev-gew4", output: "No changes."})
 
 	// Help should show z:compact
@@ -1728,7 +1741,7 @@ func TestMultiWS_CompactDiffViewLinesAreUsed(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Plan output with a large heredoc that compact diff will collapse
 	var heredocLines string
@@ -1783,7 +1796,7 @@ func TestMultiWS_ViewUsesSharedPlanViewer(t *testing.T) {
 		[]string{"default"},
 		nil,
 	)
-	m.startMultiWS("")
+	startAndConfirmMultiWS(&m, "")
 
 	// Both m.planView and m.multiWS.view should be planViewer
 	m.planView.compactDiff = true

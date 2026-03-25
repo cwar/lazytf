@@ -46,6 +46,9 @@ type multiWSState struct {
 	active bool   // true when multi-ws overlay is visible
 	filter string // filter string used for this batch
 
+	// Workspace picker (shown before planning starts)
+	picker wsPicker
+
 	items  []multiWSItem
 	cursor int // selected item in the workspace list
 	scroll int // scroll offset for the detail output
@@ -89,7 +92,8 @@ type multiWSApplyDoneMsg struct {
 
 // ─── Entry Point ─────────────────────────────────────────
 
-// startMultiWS sets up the multi-workspace mode and kicks off parallel plans.
+// startMultiWS opens the workspace picker for the given filter. The user can
+// review and toggle which workspaces will be planned before confirming.
 func (m *Model) startMultiWS(filter string) tea.Cmd {
 	if m.workspaces == nil || len(m.workspaces.Workspaces) == 0 {
 		m.statusMsg = ui.ErrorStyle.Render("No workspaces available")
@@ -106,44 +110,25 @@ func (m *Model) startMultiWS(filter string) tea.Cmd {
 		return nil
 	}
 
-	// Build items with matched var files
-	items := make([]multiWSItem, len(filtered))
+	// Match var files for each workspace
+	varFiles := make([]string, len(filtered))
 	for i, ws := range filtered {
-		items[i] = multiWSItem{
-			workspace: ws,
-			varFile:   m.matchVarFileForWorkspace(ws),
-			planFile:  tempPlanFile(),
-			status:    mwsPlanning, // tea.Batch starts all goroutines immediately
-		}
+		varFiles[i] = m.matchVarFileForWorkspace(ws)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	m.multiWS = multiWSState{
 		active: true,
 		filter: filter,
-		items:  items,
-		phase:  "planning",
-		cancel: cancel,
+		phase:  "selecting",
+		picker: newWSPicker(filtered, varFiles),
 	}
 
-	// Build batch of plan commands with semaphore
-	sem := make(chan struct{}, multiWSConcurrency)
-	var cmds []tea.Cmd
-	for _, item := range items {
-		ws := item.workspace
-		vf := item.varFile
-		pf := item.planFile
-		cmds = append(cmds, func() tea.Msg {
-			sem <- struct{}{}        // acquire
-			defer func() { <-sem }() // release
+	return nil
+}
 
-			out, err := m.runner.PlanSaveWithWorkspace(ctx, ws, vf, pf, false)
-			return multiWSPlanDoneMsg{workspace: ws, output: out, err: err}
-		})
-	}
-
-	return tea.Batch(cmds...)
+// newMultiWSContext creates a cancellable context for multi-workspace operations.
+func newMultiWSContext() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
 }
 
 // ─── Apply Streaming ─────────────────────────────────────
@@ -338,6 +323,11 @@ func (m *Model) startNextMultiWSApply() tea.Cmd {
 
 // handleMultiWSKey processes keys while in multi-workspace mode.
 func (m Model) handleMultiWSKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Workspace picker (pre-planning selection screen)
+	if m.multiWS.phase == "selecting" {
+		return m.handleWSPickerKey(msg)
+	}
+
 	key := msg.String()
 
 	switch key {
@@ -554,6 +544,11 @@ func (m *Model) multiWSVisibleHeight() int {
 
 // renderMultiWS renders the full-screen multi-workspace overlay.
 func (m Model) renderMultiWS() string {
+	// Workspace picker (pre-planning selection screen)
+	if m.multiWS.phase == "selecting" {
+		return m.renderWSPicker()
+	}
+
 	// Layout
 	leftWidth := m.width * 30 / 100
 	if leftWidth < 30 {
@@ -870,6 +865,8 @@ func (m Model) renderMultiWSHelp() string {
 
 func (m Model) multiWSPhaseIcon() string {
 	switch m.multiWS.phase {
+	case "selecting":
+		return "Select"
 	case "planning":
 		return "Planning"
 	case "reviewing":

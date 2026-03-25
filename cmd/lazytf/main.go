@@ -106,7 +106,7 @@ KEYBOARD SHORTCUTS:
         D             Run terraform destroy (plan → review → destroy)
         P             Show providers
         R             Recall last dismissed plan
-        W             Multi-workspace plan (parallel across workspaces)
+        W             Multi-workspace plan (select → plan → apply across workspaces)
 
     Plan Review:
         y             Confirm apply/destroy

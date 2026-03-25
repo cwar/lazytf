@@ -447,7 +447,7 @@ func (m Model) renderInput() string {
 		helpLine = "  " + ui.HelpKey.Render("enter") + " clear filter    " + ui.HelpKey.Render("esc") + " cancel"
 	}
 	if m.inputAction == "multi_ws_plan" && m.inputValue == "" {
-		helpLine = "  " + ui.HelpKey.Render("enter") + " plan all workspaces    " + ui.HelpKey.Render("esc") + " cancel"
+		helpLine = "  " + ui.HelpKey.Render("enter") + " select workspaces    " + ui.HelpKey.Render("esc") + " cancel"
 	}
 	lines = append(lines, helpLine)
 

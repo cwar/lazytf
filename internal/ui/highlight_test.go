@@ -275,6 +275,64 @@ func TestHighlightPlanOutput_BatchMatchesStreaming(t *testing.T) {
 	}
 }
 
+func TestClassifyLine_ApplyComplete(t *testing.T) {
+	h := NewPlanHighlighter()
+
+	// The terraform "Apply complete!" line should be classified as ApplyComplete
+	kind := h.ClassifyLine("Apply complete! Resources: 0 added, 1 changed, 0 destroyed.")
+	if kind != PlanLineApplyComplete {
+		t.Errorf("'Apply complete!' line classified as %v — should be PlanLineApplyComplete", kind)
+	}
+
+	// Also handle "Destroy complete!" (terraform destroy output)
+	h2 := NewPlanHighlighter()
+	kind = h2.ClassifyLine("Destroy complete! Resources: 3 destroyed.")
+	if kind != PlanLineApplyComplete {
+		t.Errorf("'Destroy complete!' line classified as %v — should be PlanLineApplyComplete", kind)
+	}
+
+	// Partial match — just "Apply complete!" without resource summary
+	h3 := NewPlanHighlighter()
+	kind = h3.ClassifyLine("Apply complete!")
+	if kind != PlanLineApplyComplete {
+		t.Errorf("'Apply complete!' (no resource summary) classified as %v — should be PlanLineApplyComplete", kind)
+	}
+}
+
+func TestRenderApplyComplete(t *testing.T) {
+	// Verify the render function produces non-empty, styled output
+	result := renderApplyComplete("Apply complete! Resources: 1 added, 1 changed, 0 destroyed.")
+	if result == "" {
+		t.Fatal("renderApplyComplete returned empty string")
+	}
+
+	// Should contain the text (possibly with ANSI codes)
+	if !strings.Contains(result, "Apply complete!") {
+		t.Errorf("renderApplyComplete missing 'Apply complete!' text, got: %s", result)
+	}
+
+	// The resource counts should be present
+	if !strings.Contains(result, "added") {
+		t.Errorf("renderApplyComplete missing 'added', got: %s", result)
+	}
+	if !strings.Contains(result, "changed") {
+		t.Errorf("renderApplyComplete missing 'changed', got: %s", result)
+	}
+	if !strings.Contains(result, "destroyed") {
+		t.Errorf("renderApplyComplete missing 'destroyed', got: %s", result)
+	}
+}
+
+func TestRenderApplyComplete_DestroyComplete(t *testing.T) {
+	result := renderApplyComplete("Destroy complete! Resources: 3 destroyed.")
+	if result == "" {
+		t.Fatal("renderApplyComplete returned empty for destroy")
+	}
+	if !strings.Contains(result, "Destroy complete!") {
+		t.Errorf("renderApplyComplete missing 'Destroy complete!' text, got: %s", result)
+	}
+}
+
 func TestHighlightTfContent(t *testing.T) {
 	// .tf file should get highlighted
 	hl := HighlightTfContent(`resource "test" {}`, "main.tf")

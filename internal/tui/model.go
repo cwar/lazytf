@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/cwar/lazytf/internal/config"
 	"github.com/cwar/lazytf/internal/terraform"
 	"github.com/cwar/lazytf/internal/ui"
 )
@@ -59,6 +61,9 @@ type Model struct {
 	selectedVarFile string // manually chosen var file (empty = use auto)
 	varFileManual   bool   // true if user explicitly chose a var file
 
+	// Resource file index: maps "resource.type.name" → file location for O(1) lookup
+	resourceIndex map[string]resourceLocation
+
 	// Status / loading
 	statusMsg  string
 	isLoading  bool
@@ -78,11 +83,7 @@ type Model struct {
 	planReview      bool         // true when showing a plan for review before apply/destroy
 	planIsDestroy   bool         // true if the pending plan is a destroy plan
 	planChanges     []planChange // parsed resource changes from plan output
-	planChangeCur   int          // currently selected change index
-	planFocusView   bool         // true = show one resource at a time
-	planCompactDiff      bool     // true = collapse unchanged heredoc lines
-	compactLines         []string // compacted raw lines (nil = not computed)
-	compactHighlighted   []string // compacted highlighted lines
+	planView        planViewer   // shared view state (focus, compact diff, resource nav)
 
 	// Last plan recall (saved plan available for re-review)
 	lastPlanFile        string       // path to saved plan file from last dismissed review
@@ -109,6 +110,15 @@ type Model struct {
 	inputPrompt string
 	inputValue  string
 	inputAction string
+
+	// Workspace filter (quick-filter by substring, e.g. "dev", "prod")
+	wsFilter string
+
+	// Multi-workspace batch operations (parallel plan/apply across workspaces)
+	multiWS multiWSState
+
+	// Configuration loaded from .lazytf.yaml
+	config config.Config
 }
 
 // tempPlanFile creates a unique temporary file path for saving terraform plans.
@@ -138,6 +148,9 @@ func NewModel(workDir string) Model {
 		panels[i] = &SubPanel{ID: i}
 	}
 
+	// Load config (ignore errors — defaults are fine)
+	cfg, _ := config.Load(workDir)
+
 	m := Model{
 		runner:      runner,
 		workDir:     workDir,
@@ -146,6 +159,7 @@ func NewModel(workDir string) Model {
 		panels:      panels,
 		activePanel: PanelFiles,
 		spinner:     s,
+		config:      cfg,
 		detailTitle: "Welcome",
 		detailLines: []string{
 			"",
@@ -167,13 +181,14 @@ func (m Model) Init() tea.Cmd {
 // ─── Messages ────────────────────────────────────────────
 
 type dataLoadedMsg struct {
-	files      []terraform.TfFile
-	resources  []terraform.Resource
-	modules    []terraform.ModuleCall
-	workspaces *terraform.WorkspaceInfo
-	outputs    []terraform.Output
-	gitBranch  string
-	errors     []string // non-fatal load errors to surface in the status bar
+	files         []terraform.TfFile
+	resources     []terraform.Resource
+	modules       []terraform.ModuleCall
+	workspaces    *terraform.WorkspaceInfo
+	outputs       []terraform.Output
+	gitBranch     string
+	resourceIndex map[string]resourceLocation
+	errors        []string // non-fatal load errors to surface in the status bar
 }
 
 type cmdStartMsg struct {
@@ -210,45 +225,95 @@ type graphLoadedMsg struct {
 
 func (m *Model) loadAllData() tea.Cmd {
 	return func() tea.Msg {
-		var errs []string
+		var (
+			mu         sync.Mutex
+			errs       []string
+			files      []terraform.TfFile
+			resources  []terraform.Resource
+			modules    []terraform.ModuleCall
+			workspaces *terraform.WorkspaceInfo
+			outputs    []terraform.Output
+		)
 
-		files, err := m.runner.ListFiles()
-		if err != nil {
-			errs = append(errs, "files: "+err.Error())
+		addErr := func(msg string) {
+			mu.Lock()
+			errs = append(errs, msg)
+			mu.Unlock()
 		}
-		resources, err := m.runner.StateList()
-		if err != nil {
-			errs = append(errs, "state: "+err.Error())
-		}
-		modules, err := m.runner.ParseModules()
-		if err != nil {
-			errs = append(errs, "modules: "+err.Error())
-		}
-		workspaces, err := m.runner.Workspaces()
-		if err != nil {
-			errs = append(errs, "workspaces: "+err.Error())
-		}
-		outputs, err := m.runner.Outputs()
-		if err != nil {
-			errs = append(errs, "outputs: "+err.Error())
-		}
+
+		// Run all independent data loads concurrently.
+		// File/module parsing is disk I/O; state/workspace/output are terraform
+		// subprocesses — none depend on each other.
+		var wg sync.WaitGroup
+		wg.Add(5)
+
+		go func() {
+			defer wg.Done()
+			var err error
+			files, err = m.runner.ListFiles()
+			if err != nil {
+				addErr("files: " + err.Error())
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			var err error
+			resources, err = m.runner.StateList()
+			if err != nil {
+				addErr("state: " + err.Error())
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			var err error
+			modules, err = m.runner.ParseModules()
+			if err != nil {
+				addErr("modules: " + err.Error())
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			var err error
+			workspaces, err = m.runner.Workspaces()
+			if err != nil {
+				addErr("workspaces: " + err.Error())
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			var err error
+			outputs, err = m.runner.Outputs()
+			if err != nil {
+				addErr("outputs: " + err.Error())
+			}
+		}()
+
+		wg.Wait()
+
 		gitBranch := detectGitBranch(m.workDir)
 
+		// Build resource file index (depends on files being loaded)
+		resourceIndex := buildResourceIndex(files, m.workDir)
+
 		return dataLoadedMsg{
-			files:      files,
-			resources:  resources,
-			modules:    modules,
-			workspaces: workspaces,
-			outputs:    outputs,
-			gitBranch:  gitBranch,
-			errors:     errs,
+			files:         files,
+			resources:     resources,
+			modules:       modules,
+			workspaces:    workspaces,
+			outputs:       outputs,
+			gitBranch:     gitBranch,
+			resourceIndex: resourceIndex,
+			errors:        errs,
 		}
 	}
 }
 
 func (m *Model) loadStateShow(address string) tea.Cmd {
 	return func() tea.Msg {
-		out, _ := m.runner.StateShow(address)
+		out, err := m.runner.StateShow(address)
+		if err != nil && out == "" {
+			out = "Error: " + err.Error()
+		}
 		return stateShowMsg{address: address, output: out}
 	}
 }
@@ -264,11 +329,13 @@ func (m *Model) loadGraph() tea.Cmd {
 	}
 }
 
-func (m *Model) runTfCmd(title string, fn func() (string, error)) tea.Cmd {
+func (m *Model) runTfCmd(title string, fn func(ctx context.Context) (string, error)) tea.Cmd {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelCmd = cancel
 	return tea.Sequence(
 		func() tea.Msg { return cmdStartMsg{title: title} },
 		func() tea.Msg {
-			out, err := fn()
+			out, err := fn(ctx)
 			return cmdDoneMsg{title: title, output: out, err: err}
 		},
 	)
@@ -360,13 +427,19 @@ func (m *Model) onSelectionChanged() {
 		if item == nil {
 			return
 		}
-		wsName := item.Label
+		wsName, _ := item.Data.(string)
+		if wsName == "" {
+			return
+		}
 		m.detailTitle = "Workspace: " + wsName
 		info := fmt.Sprintf("  Workspace: %s\n", wsName)
 		if wsName == m.workspace {
 			info += "\n  ✓ This is the current workspace\n"
 		} else {
 			info += "\n  Press Enter to switch to this workspace\n"
+		}
+		if m.config.IsSkipApply(wsName) {
+			info += "\n  ⊘ Skipped from multi-workspace apply all (press s to toggle)\n"
 		}
 		m.setDetailPlain(info)
 
@@ -661,15 +734,35 @@ func (m *Model) rebuildWorkspacesPanel() {
 	p.Items = nil
 
 	if m.workspaces != nil {
-		for _, ws := range m.workspaces.Workspaces {
-			icon := " "
-			if ws == m.workspace {
-				icon = "●"
+		filter := strings.ToLower(m.wsFilter)
+
+		// Two-pass: non-skipped workspaces first, then skipped ones at the end.
+		for pass := 0; pass < 2; pass++ {
+			for _, ws := range m.workspaces.Workspaces {
+				isSkipped := m.config.IsSkipApply(ws)
+				if (pass == 0 && isSkipped) || (pass == 1 && !isSkipped) {
+					continue
+				}
+				// Apply filter: skip workspaces that don't match, but always
+				// keep the active workspace visible so the user can see where they are.
+				if filter != "" && ws != m.workspace && !strings.Contains(strings.ToLower(ws), filter) {
+					continue
+				}
+				icon := " "
+				if ws == m.workspace {
+					icon = "●"
+				}
+				label := ws
+				if isSkipped {
+					label = ws + " (skip)"
+				}
+				p.Items = append(p.Items, PanelItem{
+					Label: label,
+					Icon:  icon,
+					Data:  ws, // clean name for workspace operations
+					Dim:   isSkipped,
+				})
 			}
-			p.Items = append(p.Items, PanelItem{
-				Label: ws,
-				Icon:  icon,
-			})
 		}
 	}
 
@@ -760,6 +853,52 @@ func (m *Model) rebuildVarFilesPanel() {
 	} else if len(p.Items) > 0 {
 		p.Cursor = 0
 	}
+}
+
+// ─── Resource File Index ─────────────────────────────────
+
+// resourceLocation records where a resource is declared in HCL source.
+type resourceLocation struct {
+	path string
+	line int
+}
+
+// buildResourceIndex scans .tf files and builds a map from resource keys
+// (e.g. "resource.aws_instance.web") to their file location. Called during
+// loadAllData so that findResourceFile is O(1) instead of scanning files.
+func buildResourceIndex(files []terraform.TfFile, workDir string) map[string]resourceLocation {
+	idx := make(map[string]resourceLocation)
+	for _, f := range files {
+		if f.IsVars {
+			continue
+		}
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			continue
+		}
+		for lineNum, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			var keyword string
+			if strings.HasPrefix(trimmed, "resource ") {
+				keyword = "resource"
+			} else if strings.HasPrefix(trimmed, "data ") {
+				keyword = "data"
+			} else {
+				continue
+			}
+			// Parse: keyword "type" "name"
+			rest := trimmed[len(keyword):]
+			rest = strings.TrimSpace(rest)
+			parts := strings.SplitN(rest, "\"", 5) // ["", type, " ", name, " {"]
+			if len(parts) >= 4 {
+				resType := parts[1]
+				resName := parts[3]
+				key := keyword + "." + resType + "." + resName
+				idx[key] = resourceLocation{path: f.Path, line: lineNum + 1}
+			}
+		}
+	}
+	return idx
 }
 
 // ─── Helpers ─────────────────────────────────────────────

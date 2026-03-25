@@ -381,17 +381,21 @@ func highlightString(s string) string {
 		return HclString.Render(s)
 	}
 
+	// Fast path: no interpolations — render entire string at once
+	if !strings.ContainsAny(s, "$%") {
+		return HclString.Render(s)
+	}
+
 	var result strings.Builder
 	i := 0
 
 	for i < len(s) {
 		// Look for interpolation: ${ or %{
 		if i+1 < len(s) && (s[i] == '$' || s[i] == '%') && s[i+1] == '{' {
-			// Find matching close brace (simple, doesn't handle nested)
-			depth := 0
+			// Find matching close brace (handles nested braces)
 			start := i
 			i += 2
-			depth = 1
+			depth := 1
 			for i < len(s) && depth > 0 {
 				if s[i] == '{' {
 					depth++
@@ -404,9 +408,15 @@ func highlightString(s string) string {
 			result.WriteString(HclInterp.Render(interp))
 			continue
 		}
-		// Regular string character
-		result.WriteString(HclString.Render(string(s[i])))
-		i++
+		// Accumulate run of non-interpolation characters and render as a batch
+		start := i
+		for i < len(s) {
+			if i+1 < len(s) && (s[i] == '$' || s[i] == '%') && s[i+1] == '{' {
+				break
+			}
+			i++
+		}
+		result.WriteString(HclString.Render(s[start:i]))
 	}
 
 	return result.String()
@@ -476,6 +486,7 @@ const (
 	PlanLineError                             // Error
 	PlanLineWarning                           // Warning
 	PlanLineBoilerplate                       // Terraform will perform ...
+	PlanLineApplyComplete                     // Apply complete! Resources: ...
 )
 
 // PlanHighlighter tracks state for context-aware plan output highlighting.
@@ -577,6 +588,8 @@ func (h *PlanHighlighter) ClassifyLine(line string) PlanLineKind {
 		return PlanLineForceReplace
 	case strings.HasPrefix(trimmed, "Plan:"):
 		return PlanLineSummary
+	case strings.HasPrefix(trimmed, "Apply complete!") || strings.HasPrefix(trimmed, "Destroy complete!"):
+		return PlanLineApplyComplete
 	case strings.Contains(line, "No changes") || strings.Contains(line, "Infrastructure is up-to-date"):
 		return PlanLineNoChanges
 	case strings.HasPrefix(trimmed, "───") || strings.HasPrefix(trimmed, "---"):
@@ -622,6 +635,8 @@ func applyPlanLineStyle(line string, kind PlanLineKind) string {
 		return PlanDestroy.Bold(true).Render(line)
 	case PlanLineSummary:
 		return renderPlanSummary(line)
+	case PlanLineApplyComplete:
+		return renderApplyComplete(line)
 	case PlanLineNoChanges:
 		return SuccessStyle.Render(line)
 	case PlanLineSeparator:
@@ -699,6 +714,52 @@ func renderPlanSummary(line string) string {
 			result.WriteString(lipgloss.NewStyle().Foreground(MediumGray).Render(", "))
 		}
 	}
+
+	return result.String()
+}
+
+// renderApplyComplete colorizes the "Apply complete! Resources: X added, Y changed, Z destroyed." line.
+// Mirrors the style of renderPlanSummary for visual consistency.
+func renderApplyComplete(line string) string {
+	trimmed := strings.TrimSpace(line)
+
+	// Split into prefix ("Apply complete!") and resource summary
+	var prefix, rest string
+	if idx := strings.Index(trimmed, "Resources:"); idx >= 0 {
+		prefix = strings.TrimSpace(trimmed[:idx])
+		rest = strings.TrimSpace(trimmed[idx:])
+	} else {
+		// No resource summary — just colorize the whole line
+		return SuccessStyle.Render(trimmed)
+	}
+
+	var result strings.Builder
+	result.WriteString(SuccessStyle.Render(prefix + " "))
+
+	// "Resources: X added, Y changed, Z destroyed."
+	after := strings.TrimPrefix(rest, "Resources: ")
+	result.WriteString(PlanInfo.Bold(true).Render("Resources: "))
+
+	// Strip trailing period for splitting, re-add after
+	after = strings.TrimRight(after, ".")
+	parts := strings.Split(after, ", ")
+	for i, part := range parts {
+		part = strings.TrimSpace(part)
+		switch {
+		case strings.Contains(part, "added"):
+			result.WriteString(PlanAdd.Bold(true).Render(part))
+		case strings.Contains(part, "changed"):
+			result.WriteString(PlanChange.Bold(true).Render(part))
+		case strings.Contains(part, "destroyed"):
+			result.WriteString(PlanDestroy.Bold(true).Render(part))
+		default:
+			result.WriteString(part)
+		}
+		if i < len(parts)-1 {
+			result.WriteString(lipgloss.NewStyle().Foreground(MediumGray).Render(", "))
+		}
+	}
+	result.WriteString(lipgloss.NewStyle().Foreground(MediumGray).Render("."))
 
 	return result.String()
 }

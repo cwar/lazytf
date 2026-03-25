@@ -15,8 +15,7 @@ func TestSavePlanState(t *testing.T) {
 			{Address: "aws_instance.web", Action: "create", Line: 5, EndLine: 20},
 			{Address: "aws_s3_bucket.logs", Action: "destroy", Line: 22, EndLine: 35},
 		},
-		planChangeCur: 1,
-		planFocusView: true,
+		planView: planViewer{changeCur: 1, focusView: true},
 		detailLines:   []string{"line1", "line2", "line3"},
 		highlightedLines: []string{"hl1", "hl2", "hl3"},
 		detailTitle:      "Plan → Apply",
@@ -34,8 +33,8 @@ func TestSavePlanState(t *testing.T) {
 	if m.planChanges != nil {
 		t.Error("planChanges should be nil after save")
 	}
-	if m.planFocusView {
-		t.Error("planFocusView should be false after save")
+	if m.planView.focusView {
+		t.Error("planView.focusView should be false after save")
 	}
 
 	// Last plan state should be preserved
@@ -119,11 +118,11 @@ func TestRestorePlanState(t *testing.T) {
 	if len(m.planChanges) != 1 {
 		t.Errorf("planChanges length = %d, want 1", len(m.planChanges))
 	}
-	if m.planChangeCur != 0 {
-		t.Error("planChangeCur should be reset to 0")
+	if m.planView.changeCur != 0 {
+		t.Error("planView.changeCur should be reset to 0")
 	}
-	if m.planFocusView {
-		t.Error("planFocusView should be false after restore")
+	if m.planView.focusView {
+		t.Error("planView.focusView should be false after restore")
 	}
 	if m.focus != FocusRight {
 		t.Error("focus should be FocusRight after restore")
@@ -246,8 +245,7 @@ func TestSaveThenRestore_RoundTrip(t *testing.T) {
 			{Address: "aws_instance.web", Action: "destroy", Line: 5, EndLine: 20},
 			{Address: "aws_s3_bucket.logs", Action: "destroy", Line: 22, EndLine: 35},
 		},
-		planChangeCur:    1,
-		planFocusView:    true,
+		planView:         planViewer{changeCur: 1, focusView: true},
 		detailLines:      []string{"plan output line 1", "plan output line 2"},
 		highlightedLines: []string{"hl line 1", "hl line 2"},
 		detailTitle:      "Plan → Destroy",

@@ -65,6 +65,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspaces = msg.workspaces
 		m.outputs = msg.outputs
 		m.gitBranch = msg.gitBranch
+		m.resourceIndex = msg.resourceIndex
 		if m.workspaces != nil {
 			m.workspace = m.workspaces.Current
 		}
@@ -106,13 +107,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadAllData()
 
+	case multiWSPlanDoneMsg:
+		m.handleMultiWSPlanDone(msg)
+		return m, nil
+
+	case multiWSApplyLineMsg:
+		m.handleMultiWSApplyLine(msg)
+		return m, readMultiWSApplyLine(msg.workspace, msg.ch, msg.cmdErr)
+
+	case multiWSApplyDoneMsg:
+		m.handleMultiWSApplyDone(msg)
+		cmd := m.startNextMultiWSApply()
+		return m, cmd
+
 	case clipboardMsg:
 		if msg.err != nil {
 			m.statusMsg = ui.ErrorStyle.Render("Clipboard: " + msg.err.Error())
 		} else {
 			addr := ""
-			if len(m.planChanges) > 0 {
-				addr = " — " + m.planChanges[m.planChangeCur].Address
+			if c := m.planView.CurrentChange(m.planChanges); c != nil {
+				addr = " — " + c.Address
 			}
 			m.statusMsg = ui.SuccessStyle.Render("✓ Copied to clipboard" + addr)
 		}
@@ -169,7 +183,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Plan succeeded — enter review mode
 				m.planReview = true
 				m.planChanges = parsePlanChanges(m.detailLines)
-				m.planChangeCur = 0
+				m.planView.Reset()
 				action := "apply"
 				if m.planIsDestroy {
 					action = "DESTROY"
@@ -203,6 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(msg.title, "Workspace: ") && msg.err == nil {
 			newWs := strings.TrimPrefix(msg.title, "Workspace: ")
 			m.workspace = newWs
+			m.wsFilter = "" // clear workspace filter after successful switch
 			m.autoSelectVarFile()
 		}
 

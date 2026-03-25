@@ -96,8 +96,8 @@ func (m Model) handleResourcesContextKey(key string) (tea.Model, tea.Cmd, bool) 
 		// Taint resource
 		if item := panel.SelectedItem(); item != nil {
 			if r, ok := item.Data.(terraform.Resource); ok {
-				return m, m.runTfCmd("Taint: "+r.Address, func() (string, error) {
-					return m.runner.StateTaint(r.Address)
+				return m, m.runTfCmd("Taint: "+r.Address, func(ctx context.Context) (string, error) {
+					return m.runner.RunCtx(ctx, "taint", r.Address)
 				}), true
 			}
 		}
@@ -107,8 +107,8 @@ func (m Model) handleResourcesContextKey(key string) (tea.Model, tea.Cmd, bool) 
 		// Untaint resource
 		if item := panel.SelectedItem(); item != nil {
 			if r, ok := item.Data.(terraform.Resource); ok {
-				return m, m.runTfCmd("Untaint: "+r.Address, func() (string, error) {
-					return m.runner.StateUntaint(r.Address)
+				return m, m.runTfCmd("Untaint: "+r.Address, func(ctx context.Context) (string, error) {
+					return m.runner.RunCtx(ctx, "untaint", r.Address)
 				}), true
 			}
 		}
@@ -216,6 +216,14 @@ func (m Model) handleModulesContextKey(key string) (tea.Model, tea.Cmd, bool) {
 
 func (m Model) handleWorkspacesContextKey(key string) (tea.Model, tea.Cmd, bool) {
 	switch key {
+	case "/":
+		// Filter workspaces — show input prompt, pre-fill with current filter
+		m.showInput = true
+		m.inputPrompt = "Filter Workspaces"
+		m.inputValue = m.wsFilter
+		m.inputAction = "workspace_filter"
+		return m, nil, true
+
 	case "n":
 		// New workspace — show input prompt
 		m.showInput = true
@@ -224,11 +232,45 @@ func (m Model) handleWorkspacesContextKey(key string) (tea.Model, tea.Cmd, bool)
 		m.inputAction = "workspace_new"
 		return m, nil, true
 
+	case "s":
+		// Toggle skip-apply for selected workspace (persisted to .lazytf.yaml)
+		panel := m.panels[PanelWorkspaces]
+		if item := panel.SelectedItem(); item != nil {
+			wsName, _ := item.Data.(string)
+			if wsName == "" {
+				return m, nil, true
+			}
+			m.config.ToggleSkipApply(wsName)
+			if err := m.config.Save(m.workDir); err != nil {
+				m.statusMsg = ui.ErrorStyle.Render("Failed to save config: " + err.Error())
+			} else {
+				if m.config.IsSkipApply(wsName) {
+					m.statusMsg = ui.DimItem.Render("⊘ " + wsName + " — skipped from apply all")
+				} else {
+					m.statusMsg = ui.SuccessStyle.Render("✓ " + wsName + " — included in apply all")
+				}
+			}
+			m.rebuildWorkspacesPanel()
+			// Re-point cursor to the toggled workspace (it may have moved
+			// due to skipped items being sorted to the end of the list).
+			for i, pi := range panel.Items {
+				if pi.Data.(string) == wsName {
+					panel.Cursor = i
+					panel.EnsureCursorVisible()
+					break
+				}
+			}
+		}
+		return m, nil, true
+
 	case "x":
 		// Delete workspace
 		panel := m.panels[PanelWorkspaces]
 		if item := panel.SelectedItem(); item != nil {
-			wsName := item.Label
+			wsName, _ := item.Data.(string)
+			if wsName == "" {
+				return m, nil, true
+			}
 			if wsName == m.workspace {
 				m.statusMsg = ui.ErrorStyle.Render("Cannot delete the active workspace — switch first")
 				return m, nil, true
@@ -315,7 +357,7 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "enter":
-		if m.inputValue != "" {
+		if m.inputValue != "" || m.inputAction == "workspace_filter" || m.inputAction == "multi_ws_plan" {
 			return m.submitInput()
 		}
 		return m, nil
@@ -359,10 +401,21 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 	}
 
 	switch action {
+	case "workspace_filter":
+		m.wsFilter = value
+		m.rebuildWorkspacesPanel()
+		if value != "" {
+			m.statusMsg = ui.DimItem.Render("Filtered: \"" + value + "\" — press / to change or clear")
+		} else {
+			m.statusMsg = ui.DimItem.Render("Filter cleared")
+		}
+		return m, nil
 	case "workspace_new":
-		return m, m.runTfCmd("New Workspace: "+value, func() (string, error) {
-			return m.runner.WorkspaceNew(value)
+		return m, m.runTfCmd("New Workspace: "+value, func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "workspace", "new", value)
 		})
+	case "multi_ws_plan":
+		return m, m.startMultiWS(value)
 	}
 	return m, nil
 }
@@ -378,19 +431,45 @@ func (m Model) renderInput() string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+value)
 	lines = append(lines, "")
-	lines = append(lines, "  "+ui.HelpKey.Render("enter")+" confirm    "+ui.HelpKey.Render("esc")+" cancel")
+
+	// Show workspace groups as hints for multi_ws_plan
+	if m.inputAction == "multi_ws_plan" && len(m.config.WorkspaceGroups) > 0 {
+		groupHints := "  " + ui.DimItem.Render("groups:")
+		for name, filter := range m.config.WorkspaceGroups {
+			groupHints += " " + ui.HelpKey.Render(name) + ui.HelpSep.Render("→") + ui.HelpDesc.Render(filter)
+		}
+		lines = append(lines, groupHints)
+		lines = append(lines, "")
+	}
+
+	helpLine := "  " + ui.HelpKey.Render("enter") + " confirm    " + ui.HelpKey.Render("esc") + " cancel"
+	if m.inputAction == "workspace_filter" && m.inputValue == "" {
+		helpLine = "  " + ui.HelpKey.Render("enter") + " clear filter    " + ui.HelpKey.Render("esc") + " cancel"
+	}
+	if m.inputAction == "multi_ws_plan" && m.inputValue == "" {
+		helpLine = "  " + ui.HelpKey.Render("enter") + " plan all workspaces    " + ui.HelpKey.Render("esc") + " cancel"
+	}
+	lines = append(lines, helpLine)
 
 	content := strings.Join(lines, "\n")
 	w := 50
+	if m.inputAction == "multi_ws_plan" {
+		w = 60 // wider for group hints
+	}
 	if w > m.width-4 {
 		w = m.width - 4
+	}
+
+	borderColor := ui.Purple
+	if m.inputAction == "multi_ws_plan" {
+		borderColor = ui.Cyan // differentiate multi-ws input
 	}
 
 	return lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
 		lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ui.Purple).
+			BorderForeground(borderColor).
 			Padding(1, 2).
 			Width(w).
 			Render(content),
@@ -429,9 +508,9 @@ func (m *Model) openEditor(file string, line int) tea.Cmd {
 
 // ─── Resource File Finding ───────────────────────────────
 
-// findResourceFile searches .tf files for the HCL declaration of a resource
-// given its state address (e.g., "aws_instance.example",
-// "module.vpc.aws_subnet.public", or "data.aws_ami.ubuntu").
+// findResourceFile looks up the HCL declaration file for a resource given its
+// state address (e.g., "aws_instance.example", "module.vpc.aws_subnet.public",
+// or "data.aws_ami.ubuntu"). Uses the pre-built resourceIndex for O(1) lookup.
 // Returns the file path and 1-indexed line number, or ("", 0) if not found.
 func (m *Model) findResourceFile(address string) (string, int) {
 	parts := strings.Split(address, ".")
@@ -448,35 +527,17 @@ func (m *Model) findResourceFile(address string) (string, int) {
 
 	remaining := parts[i:]
 
-	var keyword, resType, resName string
+	var key string
 	if len(remaining) >= 3 && remaining[0] == "data" {
-		keyword = "data"
-		resType = remaining[1]
-		resName = remaining[2]
+		key = "data." + remaining[1] + "." + remaining[2]
 	} else if len(remaining) >= 2 {
-		keyword = "resource"
-		resType = remaining[0]
-		resName = remaining[1]
+		key = "resource." + remaining[0] + "." + remaining[1]
 	} else {
 		return "", 0
 	}
 
-	// Search for: resource "aws_instance" "example" or data "aws_ami" "ubuntu"
-	pattern := keyword + ` "` + resType + `" "` + resName + `"`
-
-	for _, f := range m.files {
-		if f.IsVars {
-			continue
-		}
-		content, err := m.runner.ReadFile(f.Path)
-		if err != nil {
-			continue
-		}
-		for lineNum, line := range strings.Split(content, "\n") {
-			if strings.Contains(strings.TrimSpace(line), pattern) {
-				return f.Path, lineNum + 1
-			}
-		}
+	if loc, ok := m.resourceIndex[key]; ok {
+		return loc.path, loc.line
 	}
 
 	return "", 0
@@ -485,7 +546,8 @@ func (m *Model) findResourceFile(address string) (string, int) {
 // ─── Context Help Hints ─────────────────────────────────
 
 // contextKeysFor returns the context-specific key hints for a panel.
-func contextKeysFor(panel PanelID) []keyHint {
+// The model pointer is optional — pass nil when model context isn't needed.
+func contextKeysFor(panel PanelID, m *Model) []keyHint {
 	switch panel {
 	case PanelFiles:
 		return []keyHint{{"e", "edit"}}
@@ -505,8 +567,14 @@ func contextKeysFor(panel PanelID) []keyHint {
 			{"T", "target"},
 		}
 	case PanelWorkspaces:
+		filterHint := "filter"
+		if m != nil && m.wsFilter != "" {
+			filterHint = "filter:" + m.wsFilter
+		}
 		return []keyHint{
+			{"/", filterHint},
 			{"n", "new"},
+			{"s", "skip apply"},
 			{"x", "delete"},
 		}
 	case PanelVarFiles:

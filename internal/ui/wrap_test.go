@@ -89,11 +89,11 @@ func TestExtractActiveANSI(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"\x1b[32mhello", "\x1b[32m"},                   // green, no reset
-		{"\x1b[32mhello\x1b[0m", ""},                     // green then reset
-		{"\x1b[1m\x1b[32mhello", "\x1b[32m"},             // bold then green — last wins
-		{"no ansi here", ""},                              // plain text
-		{"\x1b[38;5;196mred text", "\x1b[38;5;196m"},     // 256-color
+		{"\x1b[32mhello", "\x1b[32m"},                        // green, no reset
+		{"\x1b[32mhello\x1b[0m", ""},                          // green then reset
+		{"\x1b[1m\x1b[32mhello", "\x1b[1m\x1b[32m"},          // bold then green — both accumulate
+		{"no ansi here", ""},                                   // plain text
+		{"\x1b[38;5;196mred text", "\x1b[38;5;196m"},          // 256-color
 		{"\x1b[32mstart\x1b[0m\x1b[33mcontinue", "\x1b[33m"}, // reset then yellow
 	}
 
@@ -102,6 +102,36 @@ func TestExtractActiveANSI(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractActiveANSI(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestExtractActiveANSI_AccumulatesStyles(t *testing.T) {
+	// Bold + green should both carry forward (not just the last one)
+	s := "\x1b[1mbold\x1b[32mgreen text"
+	got := extractActiveANSI(s)
+	if !strings.Contains(got, "\x1b[1m") {
+		t.Error("bold should be accumulated in active style")
+	}
+	if !strings.Contains(got, "\x1b[32m") {
+		t.Error("green should be accumulated in active style")
+	}
+}
+
+func TestExtractActiveANSI_ResetClearsAll(t *testing.T) {
+	// Bold + green + reset should yield empty
+	s := "\x1b[1m\x1b[32mtext\x1b[0m"
+	got := extractActiveANSI(s)
+	if got != "" {
+		t.Errorf("reset should clear all accumulated styles, got %q", got)
+	}
+}
+
+func TestExtractActiveANSI_ResetThenNew(t *testing.T) {
+	// Bold + reset + yellow should yield only yellow
+	s := "\x1b[1mbold\x1b[0m\x1b[33myellow"
+	got := extractActiveANSI(s)
+	if got != "\x1b[33m" {
+		t.Errorf("expected only yellow after reset, got %q", got)
 	}
 }
 

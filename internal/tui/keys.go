@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cwar/lazytf/internal/terraform"
@@ -16,8 +15,14 @@ import (
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// --- Multi-workspace mode ---
+	if m.multiWS.active {
+		return m.handleMultiWSKey(msg)
+	}
+
 	// --- Overlay dismissal ---
 	if m.showHelp || m.showLog || m.showGraph {
+		max := m.detailMaxScroll()
 		switch key {
 		case "q", "esc", "?", "l":
 			if m.showHelp && key == "?" {
@@ -32,21 +37,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "j", "down":
-			m.detailScroll++
+			m.scrollDown(max)
 			return m, nil
 		case "k", "up":
-			if m.detailScroll > 0 {
-				m.detailScroll--
-			}
+			m.scrollUp()
 			return m, nil
 		case "d", "ctrl+d":
-			m.detailScroll += 15
+			m.scrollPageDown(max)
 			return m, nil
 		case "u", "ctrl+u":
-			m.detailScroll -= 15
-			if m.detailScroll < 0 {
-				m.detailScroll = 0
-			}
+			m.scrollPageUp()
 			return m, nil
 		}
 		return m, nil
@@ -73,54 +73,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// --- Apply/Destroy result: dismiss or scroll ---
 	if m.applyResult {
+		max := m.detailMaxScroll()
 		switch key {
 		case "esc", "q":
 			m.applyResult = false
 			m.onSelectionChanged()
 			return m, m.onSelectionChangedCmd()
 		case "j", "down":
-			m.detailScroll++
-			visH := m.detailVisibleHeight()
-			max := len(m.detailLines) - visH
-			if max < 0 {
-				max = 0
-			}
-			if m.detailScroll > max {
-				m.detailScroll = max
-			}
+			m.scrollDown(max)
 			return m, nil
 		case "k", "up":
-			if m.detailScroll > 0 {
-				m.detailScroll--
-			}
+			m.scrollUp()
 			return m, nil
 		case "g":
-			m.detailScroll = 0
+			m.scrollToTop()
 			return m, nil
 		case "G":
-			visH := m.detailVisibleHeight()
-			max := len(m.detailLines) - visH
-			if max < 0 {
-				max = 0
-			}
-			m.detailScroll = max
+			m.scrollToBottom(max)
 			return m, nil
 		case "d", "ctrl+d":
-			m.detailScroll += 15
-			visH := m.detailVisibleHeight()
-			max := len(m.detailLines) - visH
-			if max < 0 {
-				max = 0
-			}
-			if m.detailScroll > max {
-				m.detailScroll = max
-			}
+			m.scrollPageDown(max)
 			return m, nil
 		case "u", "ctrl+u":
-			m.detailScroll -= 15
-			if m.detailScroll < 0 {
-				m.detailScroll = 0
-			}
+			m.scrollPageUp()
 			return m, nil
 		case "l":
 			// Allow log overlay
@@ -148,7 +123,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingPlanFile = ""
 			m.planIsDestroy = false
 			m.planChanges = nil
-			m.planFocusView = false
+			m.planView.Reset()
 			m.clearLastPlan() // consuming the plan — no recall needed
 			return m, m.runTfCmdStream(title, func(ctx context.Context, onLine func(string)) error {
 				defer os.Remove(planFile) // clean up plan file after apply
@@ -158,112 +133,86 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.savePlanState()
 			m.statusMsg = ui.DimItem.Render("Plan saved — press R to recall")
 			return m, nil
-		case "enter", "tab":
+		case "f":
 			// Toggle focused single-resource view
-			if len(m.planChanges) > 0 {
-				m.planFocusView = !m.planFocusView
+			if m.planView.ToggleFocus(m.planChanges) {
 				m.detailScroll = 0
-				m.recomputeCompactDiff()
+				m.planView.RecomputeCompact(m.detailLines, m.highlightedLines, m.planChanges)
 			}
 			return m, nil
 		case "j", "down":
-			if m.planFocusView {
+			if m.planView.focusView {
 				// Scroll within focused resource block
-				max := m.planFocusMaxScroll()
+				max := m.planView.MaxScroll(m.detailLines, m.highlightedLines, m.planChanges, m.detailVisibleHeight())
 				if m.detailScroll < max {
 					m.detailScroll++
 				}
-			} else if len(m.planChanges) > 0 {
+			} else if m.planView.NextChange(m.planChanges) {
 				// Navigate to next resource change
-				m.planChangeCur++
-				if m.planChangeCur >= len(m.planChanges) {
-					m.planChangeCur = 0
-				}
-				m.detailScroll = m.planChanges[m.planChangeCur].Line
+				m.detailScroll = m.planChanges[m.planView.changeCur].Line
 				m.followOutput = false
-				m.recomputeCompactDiff()
+				m.planView.RecomputeCompact(m.detailLines, m.highlightedLines, m.planChanges)
 			}
 			return m, nil
 		case "k", "up":
-			if m.planFocusView {
+			if m.planView.focusView {
 				// Scroll within focused resource block
 				if m.detailScroll > 0 {
 					m.detailScroll--
 				}
-			} else if len(m.planChanges) > 0 {
+			} else if m.planView.PrevChange(m.planChanges) {
 				// Navigate to previous resource change
-				m.planChangeCur--
-				if m.planChangeCur < 0 {
-					m.planChangeCur = len(m.planChanges) - 1
-				}
-				m.detailScroll = m.planChanges[m.planChangeCur].Line
+				m.detailScroll = m.planChanges[m.planView.changeCur].Line
 				m.followOutput = false
-				m.recomputeCompactDiff()
+				m.planView.RecomputeCompact(m.detailLines, m.highlightedLines, m.planChanges)
 			}
 			return m, nil
 		case "n":
 			// Next resource change (works in both full and focus view)
-			if len(m.planChanges) > 0 {
-				m.planChangeCur++
-				if m.planChangeCur >= len(m.planChanges) {
-					m.planChangeCur = 0
-				}
-				if m.planFocusView {
+			if m.planView.NextChange(m.planChanges) {
+				if m.planView.focusView {
 					m.detailScroll = 0
 				} else {
-					m.detailScroll = m.planChanges[m.planChangeCur].Line
+					m.detailScroll = m.planChanges[m.planView.changeCur].Line
 				}
 				m.followOutput = false
-				m.recomputeCompactDiff()
+				m.planView.RecomputeCompact(m.detailLines, m.highlightedLines, m.planChanges)
 			}
 			return m, nil
 		case "N":
 			// Previous resource change (works in both full and focus view)
-			if len(m.planChanges) > 0 {
-				m.planChangeCur--
-				if m.planChangeCur < 0 {
-					m.planChangeCur = len(m.planChanges) - 1
-				}
-				if m.planFocusView {
+			if m.planView.PrevChange(m.planChanges) {
+				if m.planView.focusView {
 					m.detailScroll = 0
 				} else {
-					m.detailScroll = m.planChanges[m.planChangeCur].Line
+					m.detailScroll = m.planChanges[m.planView.changeCur].Line
 				}
 				m.followOutput = false
-				m.recomputeCompactDiff()
+				m.planView.RecomputeCompact(m.detailLines, m.highlightedLines, m.planChanges)
 			}
 			return m, nil
 		case "g":
-			m.detailScroll = 0
+			m.scrollToTop()
 			return m, nil
 		case "G":
-			max := m.planFocusMaxScroll()
-			m.detailScroll = max
+			m.scrollToBottom(m.planView.MaxScroll(m.detailLines, m.highlightedLines, m.planChanges, m.detailVisibleHeight()))
 			return m, nil
 		case "d", "ctrl+d":
-			m.detailScroll += 15
-			max := m.planFocusMaxScroll()
-			if m.detailScroll > max {
-				m.detailScroll = max
-			}
+			m.scrollPageDown(m.planView.MaxScroll(m.detailLines, m.highlightedLines, m.planChanges, m.detailVisibleHeight()))
 			return m, nil
 		case "u", "ctrl+u":
-			m.detailScroll -= 15
-			if m.detailScroll < 0 {
-				m.detailScroll = 0
-			}
+			m.scrollPageUp()
 			return m, nil
 		case "z":
 			// Toggle compact diff mode — collapses unchanged heredoc lines
-			m.planCompactDiff = !m.planCompactDiff
-			m.recomputeCompactDiff()
+			m.planView.compactDiff = !m.planView.compactDiff
+			m.planView.RecomputeCompact(m.detailLines, m.highlightedLines, m.planChanges)
 			m.detailScroll = 0
 			return m, nil
 		case "c":
 			// Copy current resource diff to clipboard
 			if len(m.planChanges) > 0 {
-				source, _ := m.planFocusBlock()
-				text := strings.Join(source, "\n")
+				text := m.planView.CopyBlock(m.detailLines, m.planChanges)
 				m.statusMsg = ui.DimItem.Render("Copying to clipboard…")
 				return m, copyToClipboard(text)
 			}
@@ -302,12 +251,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = true
 		return m, nil
 	case "tab":
-		if m.focus == FocusLeft {
-			m.focus = FocusRight
-		} else {
-			m.focus = FocusLeft
-		}
-		return m, nil
+		m.nextPanel()
+		m.onSelectionChanged()
+		return m, m.onSelectionChangedCmd()
+	case "shift+tab":
+		m.prevPanel()
+		m.onSelectionChanged()
+		return m, m.onSelectionChangedCmd()
 	case "l":
 		m.showLog = !m.showLog
 		m.detailScroll = 0
@@ -345,12 +295,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Right pane: go to bottom
-		visH := m.detailVisibleHeight()
-		max := len(m.detailLines) - visH
-		if max < 0 {
-			max = 0
-		}
-		m.detailScroll = max
+		m.scrollToBottom(m.detailMaxScroll())
 		return m, nil
 	}
 
@@ -452,45 +397,30 @@ func (m Model) handleLeftKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleRightKey(key string) (tea.Model, tea.Cmd) {
-	visH := m.detailVisibleHeight()
-	maxScroll := len(m.detailLines) - visH
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
+	max := m.detailMaxScroll()
 
 	switch key {
 	case "j", "down":
-		if m.detailScroll < maxScroll {
-			m.detailScroll++
-		}
-		// Re-engage follow if scrolled to bottom
-		if m.detailScroll >= maxScroll {
+		m.scrollDown(max)
+		if m.detailScroll >= max {
 			m.followOutput = true
 		}
 	case "k", "up":
-		if m.detailScroll > 0 {
-			m.detailScroll--
-			m.followOutput = false // user scrolled up, stop auto-following
-		}
+		m.scrollUp()
+		m.followOutput = false
 	case "d", "ctrl+d":
-		m.detailScroll += 15
-		if m.detailScroll > maxScroll {
-			m.detailScroll = maxScroll
-		}
-		if m.detailScroll >= maxScroll {
+		m.scrollPageDown(max)
+		if m.detailScroll >= max {
 			m.followOutput = true
 		}
 	case "u", "ctrl+u":
-		m.detailScroll -= 15
-		if m.detailScroll < 0 {
-			m.detailScroll = 0
-		}
+		m.scrollPageUp()
 		m.followOutput = false
 	case "g":
-		m.detailScroll = 0
+		m.scrollToTop()
 		m.followOutput = false
 	case "G":
-		m.detailScroll = maxScroll
+		m.scrollToBottom(max)
 		m.followOutput = true
 
 	// Context key: edit the file currently being viewed
@@ -525,20 +455,20 @@ func (m Model) runGlobalCommand(key string) (tea.Model, tea.Cmd) {
 			return m.runner.PlanSaveStream(ctx, varFile, planFile, false, onLine)
 		})
 	case "i":
-		return m, m.runTfCmd("Init", func() (string, error) {
-			return m.runner.Init()
+		return m, m.runTfCmd("Init", func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "init")
 		})
 	case "v":
-		return m, m.runTfCmd("Validate", func() (string, error) {
-			return m.runner.Validate()
+		return m, m.runTfCmd("Validate", func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "validate")
 		})
 	case "f":
-		return m, m.runTfCmd("Format Check", func() (string, error) {
-			return m.runner.Fmt()
+		return m, m.runTfCmd("Format Check", func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "fmt", "-check", "-diff")
 		})
 	case "F":
-		return m, m.runTfCmd("Format Fix", func() (string, error) {
-			return m.runner.FmtFix()
+		return m, m.runTfCmd("Format Fix", func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "fmt")
 		})
 	case "D":
 		m.clearLastPlan()
@@ -550,12 +480,19 @@ func (m Model) runGlobalCommand(key string) (tea.Model, tea.Cmd) {
 			return m.runner.PlanSaveStream(ctx, varFile, planFile, true, onLine)
 		})
 	case "P":
-		return m, m.runTfCmd("Providers", func() (string, error) {
-			return m.runner.Providers()
+		return m, m.runTfCmd("Providers", func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "providers")
 		})
 	case "r":
 		m.statusMsg = ui.SpinnerLabel.Render("⟳ Refreshing...")
 		return m, m.loadAllData()
+	case "W":
+		// Multi-workspace mode: prompt for filter
+		m.showInput = true
+		m.inputPrompt = "Multi-workspace plan — filter (blank=all):"
+		m.inputValue = ""
+		m.inputAction = "multi_ws_plan"
+		return m, nil
 	}
 	return m, nil
 }
@@ -571,15 +508,15 @@ func (m Model) handlePanelAction() (tea.Model, tea.Cmd) {
 	switch m.activePanel {
 	case PanelWorkspaces:
 		// Switch workspace — reset to auto var-file selection
-		wsName := item.Label
-		if wsName != m.workspace {
+		wsName, _ := item.Data.(string)
+		if wsName != "" && wsName != m.workspace {
 			if m.isLoading {
 				m.statusMsg = busyMsg()
 				return m, nil
 			}
 			m.varFileManual = false
-			return m, m.runTfCmd("Workspace: "+wsName, func() (string, error) {
-				return m.runner.WorkspaceSelect(wsName)
+			return m, m.runTfCmd("Workspace: "+wsName, func(ctx context.Context) (string, error) {
+				return m.runner.RunCtx(ctx, "workspace", "select", wsName)
 			})
 		}
 
@@ -616,7 +553,7 @@ func (m Model) handlePanelAction() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) executeConfirmed() (Model, tea.Cmd) {
+func (m Model) executeConfirmed() (tea.Model, tea.Cmd) {
 	if m.isLoading {
 		m.statusMsg = busyMsg()
 		return m, nil
@@ -630,102 +567,16 @@ func (m Model) executeConfirmed() (Model, tea.Cmd) {
 
 	switch action {
 	case "state_rm":
-		return m, m.runTfCmd("State Rm: "+data, func() (string, error) {
-			return m.runner.StateRm(data)
+		return m, m.runTfCmd("State Rm: "+data, func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "state", "rm", data)
 		})
 	case "workspace_delete":
-		return m, m.runTfCmd("Delete Workspace: "+data, func() (string, error) {
-			return m.runner.WorkspaceDelete(data)
+		return m, m.runTfCmd("Delete Workspace: "+data, func(ctx context.Context) (string, error) {
+			return m.runner.RunCtx(ctx, "workspace", "delete", data)
 		})
 	}
 
 	return m, nil
-}
-
-// planFocusBlock returns the detail lines and highlighted lines for just the
-// currently selected resource change block. Used in focused view mode.
-func (m Model) planFocusBlock() (source []string, hl []string) {
-	if len(m.planChanges) == 0 {
-		return m.detailLines, m.highlightedLines
-	}
-	c := m.planChanges[m.planChangeCur]
-	start := c.Line
-	end := c.EndLine
-	if start > len(m.detailLines) {
-		start = len(m.detailLines)
-	}
-	if end > len(m.detailLines) {
-		end = len(m.detailLines)
-	}
-	source = m.detailLines[start:end]
-	if m.isHighlighted && len(m.highlightedLines) >= end {
-		hl = m.highlightedLines[start:end]
-	}
-	return source, hl
-}
-
-// planViewLines returns the lines and highlighted lines for the current plan
-// view, applying compact diff if enabled. Handles both full plan and focused
-// single-resource views.
-func (m *Model) planViewLines() (source []string, hl []string) {
-	if m.planFocusView && len(m.planChanges) > 0 {
-		source, hl = m.planFocusBlock()
-	} else {
-		source = m.detailLines
-		hl = m.highlightedLines
-	}
-
-	if !m.planCompactDiff {
-		return source, hl
-	}
-
-	// Use precomputed compact lines (computed in recomputeCompactDiff)
-	if m.compactLines != nil {
-		return m.compactLines, m.compactHighlighted
-	}
-	return source, hl
-}
-
-// recomputeCompactDiff rebuilds the compact diff cache from current state.
-// Must be called in Update() whenever planCompactDiff, planFocusView,
-// planChangeCur, or the underlying plan data changes.
-func (m *Model) recomputeCompactDiff() {
-	if !m.planCompactDiff {
-		m.compactLines = nil
-		m.compactHighlighted = nil
-		return
-	}
-
-	var source, hl []string
-	if m.planFocusView && len(m.planChanges) > 0 {
-		source, hl = m.planFocusBlock()
-	} else {
-		source = m.detailLines
-		hl = m.highlightedLines
-	}
-
-	if len(hl) == len(source) {
-		m.compactLines, m.compactHighlighted = ui.CompactDiffHighlighted(source, hl, 3)
-	} else {
-		m.compactLines = ui.CompactDiff(source, 3)
-		m.compactHighlighted = nil
-	}
-}
-
-// planFocusMaxScroll returns the max scroll value for the current view
-// (focused block or full plan), accounting for compact diff.
-func (m *Model) planFocusMaxScroll() int {
-	visH := m.detailVisibleHeight()
-	if visH < 1 {
-		visH = 1
-	}
-	source, _ := m.planViewLines()
-	total := len(source)
-	max := total - visH
-	if max < 0 {
-		max = 0
-	}
-	return max
 }
 
 // detailVisibleHeight returns the number of content lines visible in the

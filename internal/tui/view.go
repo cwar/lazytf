@@ -15,6 +15,11 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
+	// Multi-workspace overlay (full-screen mode)
+	if m.multiWS.active {
+		return m.renderMultiWS()
+	}
+
 	// Overlays
 	if m.showHelp {
 		return m.renderHelp()
@@ -103,15 +108,16 @@ func (m Model) renderDetailPane(width, height int) string {
 	}
 
 	detailTitle := m.detailTitle
-	if m.planReview && len(m.planChanges) > 0 {
-		c := m.planChanges[m.planChangeCur]
-		modeTag := ""
-		if m.planFocusView {
-			modeTag = "🔍 "
+	if m.planReview {
+		if c := m.planView.CurrentChange(m.planChanges); c != nil {
+			modeTag := ""
+			if m.planView.focusView {
+				modeTag = "🔍 "
+			}
+			detailTitle = fmt.Sprintf("%s[%d/%d] %s%s %s",
+				modeTag, m.planView.changeCur+1, len(m.planChanges),
+				actionIcon(c.Action), actionLabel(c.Action), c.Address)
 		}
-		detailTitle = fmt.Sprintf("%s[%d/%d] %s%s %s",
-			modeTag, m.planChangeCur+1, len(m.planChanges),
-			actionIcon(c.Action), actionLabel(c.Action), c.Address)
 	}
 	title := titleStyle.Render(" " + detailTitle + " ")
 
@@ -134,8 +140,8 @@ func (m Model) renderDetailPane(width, height int) string {
 	} else if m.showGraph {
 		sourceLines = m.detailLines
 	} else if m.planReview {
-		// Plan review: use planViewLines which handles focus + compact
-		sourceLines, hlLines = m.planViewLines()
+		// Plan review: use planView which handles focus + compact
+		sourceLines, hlLines = m.planView.ViewLines(m.detailLines, m.highlightedLines, m.planChanges)
 		useOverlayHL = len(hlLines) == len(sourceLines) && len(hlLines) > 0
 	} else {
 		sourceLines = m.detailLines
@@ -250,20 +256,20 @@ func (m Model) renderHelpHint() string {
 			action = "DESTROY"
 		}
 		focusLabel := "focus"
-		if m.planFocusView {
+		if m.planView.focusView {
 			focusLabel = "full plan"
 		}
 		compactLabel := "compact"
-		if m.planCompactDiff {
+		if m.planView.compactDiff {
 			compactLabel = "full diff"
 		}
 		hint := ui.WarningStyle.Render("▶ Review plan") + "  " +
 			ui.HelpKey.Render("y") + ui.HelpSep.Render(":") + ui.SuccessStyle.Render(action) + "  " +
 			ui.HelpKey.Render("esc") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("cancel") + "  " +
 			ui.HelpKey.Render("n/N") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("next/prev") + "  " +
-			ui.HelpKey.Render("enter") + ui.HelpSep.Render(":") + ui.HelpDesc.Render(focusLabel) + "  " +
+			ui.HelpKey.Render("f") + ui.HelpSep.Render(":") + ui.HelpDesc.Render(focusLabel) + "  " +
 			ui.HelpKey.Render("z") + ui.HelpSep.Render(":") + ui.HelpDesc.Render(compactLabel) + "  "
-		if m.planFocusView {
+		if m.planView.focusView {
 			hint += ui.HelpKey.Render("j/k") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("scroll") + "  "
 		}
 		hint += ui.HelpKey.Render("d/u") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("page dn/up") + "  " +
@@ -275,7 +281,7 @@ func (m Model) renderHelpHint() string {
 	}
 
 	// Context-specific keys for the active panel
-	ctxKeys := contextKeysFor(m.activePanel)
+	ctxKeys := contextKeysFor(m.activePanel, &m)
 
 	// Build context section (panel-specific keys, shown first)
 	var ctxSection string
@@ -298,12 +304,13 @@ func (m Model) renderHelpHint() string {
 			{"i", "init"},
 			{"v", "validate"},
 			{"D", "destroy"},
+			{"W", "multi-ws"},
 			{"G", "graph"},
 			{"f", "fmt"},
 			{"l", "log"},
 			{"r", "refresh"},
 			{"1-6", "panels"},
-			{"tab", "switch"},
+			{"tab", "next panel"},
 			{"?", "help"},
 			{"q", "quit"},
 		}
@@ -313,6 +320,7 @@ func (m Model) renderHelpHint() string {
 			{"a", "apply"},
 			{"i", "init"},
 			{"D", "destroy"},
+			{"W", "multi-ws"},
 			{"r", "refresh"},
 			{"?", "help"},
 			{"q", "quit"},
@@ -354,7 +362,7 @@ func (m Model) renderHelp() string {
 			{"j/k ↑/↓", "Move up/down in active panel"},
 			{"1-6", "Jump to panel by number"},
 			{"[ ]", "Cycle through panels"},
-			{"Tab", "Switch between left panels / right detail"},
+			{"Tab/S-Tab", "Cycle through panels forward/back"},
 			{"Enter", "Select (switch workspace, toggle varfile, focus detail)"},
 			{"g/G", "Top/bottom of detail pane"},
 			{"d/u", "Page down/up in detail pane"},
@@ -366,6 +374,7 @@ func (m Model) renderHelp() string {
 			{"v", "terraform validate"},
 			{"f/F", "terraform fmt check / fix"},
 			{"D", "terraform destroy (plan → review → destroy)"},
+			{"W", "Multi-workspace plan (parallel)"},
 			{"R", "Recall last plan (re-enter review)"},
 			{"P", "Show providers"},
 		}},
@@ -376,9 +385,18 @@ func (m Model) renderHelp() string {
 			{"j/k ↑/↓", "Scroll within resource (focus mode)"},
 			{"d/u", "Page down/up"},
 			{"g/G", "Top/bottom"},
-			{"enter", "Toggle focus mode (single resource)"},
+			{"f", "Toggle focus mode (single resource)"},
 			{"z", "Toggle compact diff (collapse unchanged heredocs)"},
 			{"c", "Copy current resource diff to clipboard"},
+		}},
+		{"Multi-Workspace (W)", []struct{ key, desc string }{
+			{"n/N", "Next/previous workspace"},
+			{"j/k ↑/↓", "Scroll output"},
+			{"d/u", "Page down/up"},
+			{"g/G", "Top/bottom"},
+			{"y", "Apply selected workspace"},
+			{"A", "Apply ALL with changes (sequential)"},
+			{"esc", "Close / cancel"},
 		}},
 		{"Apply/Destroy Result", []struct{ key, desc string }{
 			{"esc/q", "Dismiss result and return to normal view"},
@@ -408,6 +426,7 @@ func (m Model) renderHelp() string {
 			{"T", "Targeted plan → apply"},
 		}},
 		{"📁 Workspaces", []struct{ key, desc string }{
+			{"/", "Filter workspaces (e.g. dev, prod)"},
 			{"n", "Create new workspace"},
 			{"x", "Delete workspace"},
 		}},

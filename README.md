@@ -66,6 +66,18 @@ lazytf /path/to/terraform/project
 | `D` | Run `terraform destroy` (with confirmation) |
 | `P` | Show providers |
 
+### Multi-Workspace Operations
+
+| Key | Action |
+|-----|--------|
+| `W` | Multi-workspace plan (parallel across workspaces) |
+| `j`/`k` | Select workspace (in multi-ws mode) |
+| `y` | Apply selected workspace |
+| `A` | Apply ALL workspaces with changes (sequential) |
+| `esc` | Close / cancel all |
+
+Press `W` to enter multi-workspace mode. You'll be prompted for a filter (e.g. "dev", "prod") or leave blank for all workspaces. Plans run in parallel (up to 4 concurrent). Review results, then apply individually or all at once.
+
 ### State Management
 
 | Key | Action |
@@ -104,6 +116,30 @@ lazytf wraps the `terraform` CLI with a terminal UI built on [Bubbletea](https:/
  workspace: default                    ✓ Plan complete
  p:plan │ a:apply │ i:init │ ?:help │ q:quit
 ```
+
+## Configuration
+
+Create a `.lazytf.yaml` in your terraform project directory to customize behavior:
+
+```yaml
+# Workspaces to skip during multi-workspace operations (W key).
+# These still appear in the normal workspace panel.
+ignore_workspaces:
+  - default
+  - prod-gae2
+
+# Named groups for quick workspace filtering.
+# When you press W and type "dev", it resolves to the filter "dev-".
+workspace_groups:
+  dev: dev-
+  prod: prod-
+  podcast: podcast
+  osd: osd
+```
+
+### Workspace Groups
+
+Groups let you define shorthand names for workspace filters. When entering multi-workspace mode (`W`), typing a group name applies its filter pattern. If the input doesn't match a group name, it's used as a plain substring filter.
 
 ## License
 

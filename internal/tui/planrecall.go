@@ -25,11 +25,7 @@ func (m *Model) savePlanState() {
 	m.planReview = false
 	m.planIsDestroy = false
 	m.planChanges = nil
-	m.planChangeCur = 0
-	m.planFocusView = false
-	m.planCompactDiff = false
-	m.compactLines = nil
-	m.compactHighlighted = nil // cleared, not recomputed — plan review is exiting
+	m.planView.Reset()
 }
 
 // restorePlanState re-enters plan review mode from a previously saved plan.
@@ -50,11 +46,7 @@ func (m *Model) restorePlanState() bool {
 	m.pendingPlanFile = m.lastPlanFile
 	m.planReview = true
 	m.planIsDestroy = m.lastPlanIsDestroy
-	m.planChangeCur = 0
-	m.planFocusView = false
-	m.planCompactDiff = false
-	m.compactLines = nil
-	m.compactHighlighted = nil // cleared — compact off on restore
+	m.planView.Reset()
 
 	m.planChanges = make([]planChange, len(m.lastPlanChanges))
 	copy(m.planChanges, m.lastPlanChanges)

@@ -83,16 +83,56 @@ type WorkspaceInfo struct {
 
 // run executes a terraform command and returns combined output.
 func (r *Runner) run(args ...string) (string, error) {
-	return r.runCtx(context.Background(), args...)
+	return r.RunCtx(context.Background(), args...)
 }
 
-// runCtx executes a terraform command with context support for cancellation.
-func (r *Runner) runCtx(ctx context.Context, args ...string) (string, error) {
+// RunCtx executes a terraform command with context support for cancellation.
+// Exported so TUI callers can pass a cancellable context for Ctrl+C support.
+func (r *Runner) RunCtx(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, r.Binary, args...)
 	cmd.Dir = r.WorkDir
 	cmd.Env = append(os.Environ(), "TF_IN_AUTOMATION=1", "TF_CLI_ARGS=-no-color")
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// RunCtxWithEnv executes a terraform command with extra environment variables.
+// Used for multi-workspace operations where TF_WORKSPACE overrides the active
+// workspace without modifying .terraform/environment.
+func (r *Runner) RunCtxWithEnv(ctx context.Context, extraEnv []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.Binary, args...)
+	cmd.Dir = r.WorkDir
+	env := append(os.Environ(), "TF_IN_AUTOMATION=1", "TF_CLI_ARGS=-no-color")
+	env = append(env, extraEnv...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// PlanSaveWithWorkspace runs terraform plan with -out for a specific workspace.
+// Uses TF_WORKSPACE env var so the active workspace in .terraform/environment
+// is not mutated. This enables parallel plans across different workspaces.
+func (r *Runner) PlanSaveWithWorkspace(ctx context.Context, workspace, varFile, outFile string, destroy bool) (string, error) {
+	args := []string{"plan", "-out=" + outFile}
+	if destroy {
+		args = append(args, "-destroy")
+	}
+	if varFile != "" {
+		args = append(args, "-var-file="+varFile)
+	}
+	return r.RunCtxWithEnv(ctx, []string{"TF_WORKSPACE=" + workspace}, args...)
+}
+
+// ApplyPlanWithWorkspace runs terraform apply on a saved plan file for a
+// specific workspace. Uses TF_WORKSPACE to target the right workspace.
+func (r *Runner) ApplyPlanWithWorkspace(ctx context.Context, workspace, planFile string) (string, error) {
+	return r.RunCtxWithEnv(ctx, []string{"TF_WORKSPACE=" + workspace}, "apply", planFile)
+}
+
+// ApplyPlanStreamWithWorkspace runs terraform apply on a saved plan file for a
+// specific workspace, streaming output line by line. Uses TF_WORKSPACE env var.
+func (r *Runner) ApplyPlanStreamWithWorkspace(ctx context.Context, workspace, planFile string, onLine func(string)) error {
+	return r.runStreamCtxWithEnv(ctx, []string{"TF_WORKSPACE=" + workspace}, onLine, "apply", planFile)
 }
 
 // runStream executes a terraform command and streams output line by line.
@@ -103,9 +143,17 @@ func (r *Runner) runStream(onLine func(string), args ...string) error {
 // runStreamCtx executes a terraform command with context support, streaming
 // output line by line. When the context is cancelled, the child process is killed.
 func (r *Runner) runStreamCtx(ctx context.Context, onLine func(string), args ...string) error {
+	return r.runStreamCtxWithEnv(ctx, nil, onLine, args...)
+}
+
+// runStreamCtxWithEnv executes a terraform command with context support and
+// extra environment variables, streaming output line by line.
+func (r *Runner) runStreamCtxWithEnv(ctx context.Context, extraEnv []string, onLine func(string), args ...string) error {
 	cmd := exec.CommandContext(ctx, r.Binary, args...)
 	cmd.Dir = r.WorkDir
-	cmd.Env = append(os.Environ(), "TF_IN_AUTOMATION=1", "TF_CLI_ARGS=-no-color")
+	env := append(os.Environ(), "TF_IN_AUTOMATION=1", "TF_CLI_ARGS=-no-color")
+	env = append(env, extraEnv...)
+	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

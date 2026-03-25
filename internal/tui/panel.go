@@ -49,9 +49,10 @@ type SubPanel struct {
 
 // PanelItem is a single selectable item in a sub-panel.
 type PanelItem struct {
-	Label string      // display text
-	Data  any // associated object
-	Icon  string      // optional prefix icon
+	Label string // display text
+	Data  any    // associated object
+	Icon  string // optional prefix icon
+	Dim   bool   // render with faded/gray styling (e.g. skipped workspaces)
 }
 
 // VisibleHeight returns the number of item rows visible (height minus border/title).
@@ -154,6 +155,8 @@ func (p *SubPanel) Render(width int, isActive, isLeftFocused bool) string {
 				Foreground(ui.White).
 				Background(lipgloss.Color("#1A2744")).
 				Render(line)
+		} else if item.Dim {
+			line = ui.DimItem.Render(line)
 		}
 
 		lines = append(lines, line)

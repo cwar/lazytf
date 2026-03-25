@@ -33,10 +33,8 @@ func basePlanReviewModel() Model {
 			{Address: "aws_instance.b", Action: "update", Line: 15, EndLine: 45},
 			{Address: "aws_instance.c", Action: "destroy", Line: 45, EndLine: 50},
 		},
-		planChangeCur: 0,
-		planFocusView: false,
-		detailScroll:  0,
-		panels:        makePanels(), // reuse helper from workspace_switch_test
+		detailScroll: 0,
+		panels:       makePanels(), // reuse helper from workspace_switch_test
 	}
 }
 
@@ -44,8 +42,8 @@ func basePlanReviewModel() Model {
 
 func TestFocusMode_JScrollsDown(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
-	m.planChangeCur = 1 // resource 1 has 30 lines (15..45), overflows viewport
+	m.planView.focusView = true
+	m.planView.changeCur = 1 // resource 1 has 30 lines (15..45), overflows viewport
 	m.detailScroll = 0
 
 	m = sendKey(m, "j")
@@ -54,14 +52,14 @@ func TestFocusMode_JScrollsDown(t *testing.T) {
 		t.Errorf("detailScroll = %d, want 1", m.detailScroll)
 	}
 	// Should stay on same resource
-	if m.planChangeCur != 1 {
-		t.Errorf("planChangeCur = %d, want 1 (should not change resource)", m.planChangeCur)
+	if m.planView.changeCur != 1 {
+		t.Errorf("changeCur = %d, want 1 (should not change resource)", m.planView.changeCur)
 	}
 }
 
 func TestFocusMode_KScrollsUp(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
+	m.planView.focusView = true
 	m.detailScroll = 5
 
 	m = sendKey(m, "k")
@@ -69,14 +67,14 @@ func TestFocusMode_KScrollsUp(t *testing.T) {
 	if m.detailScroll != 4 {
 		t.Errorf("detailScroll = %d, want 4", m.detailScroll)
 	}
-	if m.planChangeCur != 0 {
-		t.Errorf("planChangeCur = %d, want 0", m.planChangeCur)
+	if m.planView.changeCur != 0 {
+		t.Errorf("changeCur = %d, want 0", m.planView.changeCur)
 	}
 }
 
 func TestFocusMode_KDoesNotScrollBelowZero(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
+	m.planView.focusView = true
 	m.detailScroll = 0
 
 	m = sendKey(m, "k")
@@ -88,10 +86,10 @@ func TestFocusMode_KDoesNotScrollBelowZero(t *testing.T) {
 
 func TestFocusMode_JClampsToMax(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
+	m.planView.focusView = true
 	// Resource 0 has 15 lines (0..15), visH = 24, so max scroll = 0 (fits)
 	// But resource 1 has 30 lines (15..45), max scroll = 30 - 24 = 6
-	m.planChangeCur = 1
+	m.planView.changeCur = 1
 	m.detailScroll = 6 // already at max
 
 	m = sendKey(m, "j")
@@ -103,8 +101,8 @@ func TestFocusMode_JClampsToMax(t *testing.T) {
 
 func TestFocusMode_DownArrowScrolls(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
-	m.planChangeCur = 1 // resource with enough lines to scroll
+	m.planView.focusView = true
+	m.planView.changeCur = 1 // resource with enough lines to scroll
 	m.detailScroll = 0
 
 	m = sendSpecialKey(m, tea.KeyDown)
@@ -112,14 +110,14 @@ func TestFocusMode_DownArrowScrolls(t *testing.T) {
 	if m.detailScroll != 1 {
 		t.Errorf("detailScroll = %d, want 1", m.detailScroll)
 	}
-	if m.planChangeCur != 1 {
-		t.Errorf("planChangeCur = %d, want 1", m.planChangeCur)
+	if m.planView.changeCur != 1 {
+		t.Errorf("changeCur = %d, want 1", m.planView.changeCur)
 	}
 }
 
 func TestFocusMode_UpArrowScrolls(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
+	m.planView.focusView = true
 	m.detailScroll = 3
 
 	m = sendSpecialKey(m, tea.KeyUp)
@@ -133,14 +131,14 @@ func TestFocusMode_UpArrowScrolls(t *testing.T) {
 
 func TestFocusMode_NNavigatesNext(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
-	m.planChangeCur = 0
+	m.planView.focusView = true
+	m.planView.changeCur = 0
 	m.detailScroll = 5
 
 	m = sendKey(m, "n")
 
-	if m.planChangeCur != 1 {
-		t.Errorf("planChangeCur = %d, want 1", m.planChangeCur)
+	if m.planView.changeCur != 1 {
+		t.Errorf("changeCur = %d, want 1", m.planView.changeCur)
 	}
 	if m.detailScroll != 0 {
 		t.Errorf("detailScroll = %d, want 0 (should reset on resource change)", m.detailScroll)
@@ -149,14 +147,14 @@ func TestFocusMode_NNavigatesNext(t *testing.T) {
 
 func TestFocusMode_ShiftNNavigatesPrev(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
-	m.planChangeCur = 1
+	m.planView.focusView = true
+	m.planView.changeCur = 1
 	m.detailScroll = 3
 
 	m = sendKey(m, "N")
 
-	if m.planChangeCur != 0 {
-		t.Errorf("planChangeCur = %d, want 0", m.planChangeCur)
+	if m.planView.changeCur != 0 {
+		t.Errorf("changeCur = %d, want 0", m.planView.changeCur)
 	}
 	if m.detailScroll != 0 {
 		t.Errorf("detailScroll = %d, want 0", m.detailScroll)
@@ -165,13 +163,13 @@ func TestFocusMode_ShiftNNavigatesPrev(t *testing.T) {
 
 func TestFocusMode_NWrapsAround(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
-	m.planChangeCur = 2 // last resource
+	m.planView.focusView = true
+	m.planView.changeCur = 2 // last resource
 
 	m = sendKey(m, "n")
 
-	if m.planChangeCur != 0 {
-		t.Errorf("planChangeCur = %d, want 0 (should wrap)", m.planChangeCur)
+	if m.planView.changeCur != 0 {
+		t.Errorf("changeCur = %d, want 0 (should wrap)", m.planView.changeCur)
 	}
 }
 
@@ -179,13 +177,12 @@ func TestFocusMode_NWrapsAround(t *testing.T) {
 
 func TestNonFocus_JNavigatesNext(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = false
-	m.planChangeCur = 0
+	// focusView and changeCur default to zero values (off, 0)
 
 	m = sendKey(m, "j")
 
-	if m.planChangeCur != 1 {
-		t.Errorf("planChangeCur = %d, want 1", m.planChangeCur)
+	if m.planView.changeCur != 1 {
+		t.Errorf("changeCur = %d, want 1", m.planView.changeCur)
 	}
 	if m.detailScroll != 15 {
 		t.Errorf("detailScroll = %d, want 15 (resource 1 starts at line 15)", m.detailScroll)
@@ -194,13 +191,12 @@ func TestNonFocus_JNavigatesNext(t *testing.T) {
 
 func TestNonFocus_KNavigatesPrev(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = false
-	m.planChangeCur = 1
+	m.planView.changeCur = 1
 
 	m = sendKey(m, "k")
 
-	if m.planChangeCur != 0 {
-		t.Errorf("planChangeCur = %d, want 0", m.planChangeCur)
+	if m.planView.changeCur != 0 {
+		t.Errorf("changeCur = %d, want 0", m.planView.changeCur)
 	}
 	if m.detailScroll != 0 {
 		t.Errorf("detailScroll = %d, want 0 (resource 0 starts at line 0)", m.detailScroll)
@@ -209,12 +205,11 @@ func TestNonFocus_KNavigatesPrev(t *testing.T) {
 
 func TestNonFocus_NNavigatesNext(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = false
-	m.planChangeCur = 0
+	// focusView defaults to false, changeCur defaults to 0
 
 	m = sendKey(m, "n")
 
-	if m.planChangeCur != 1 {
-		t.Errorf("planChangeCur = %d, want 1", m.planChangeCur)
+	if m.planView.changeCur != 1 {
+		t.Errorf("changeCur = %d, want 1", m.planView.changeCur)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cwar/lazytf/internal/tui"
@@ -59,6 +61,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Continuing anyway...\n\n")
 	}
 
+	// Clean up stale plan files from previous crashed sessions
+	cleanStalePlanFiles()
+
 	// Create and run TUI
 	model := tui.NewModel(absDir)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -85,32 +90,79 @@ FLAGS:
 KEYBOARD SHORTCUTS:
     Navigation:
         j/k, ↑/↓     Move up/down
-        Tab           Switch between sidebar and main pane
-        Enter/Space   Select item / Toggle section
-        g/G           Go to top/bottom (main pane)
-        d/u           Page down/up (main pane)
+        1-6           Jump to panel by number
+        [ ]           Cycle through panels
+        Tab           Switch between sidebar and detail pane
+        Enter/Space   Select item / Focus detail pane
+        g/G           Top/bottom of detail pane
+        d/u           Page down/up in detail pane
 
     Terraform Commands:
         p             Run terraform plan
-        a             Run terraform apply (with confirmation)
+        a             Run terraform apply (plan → review → apply)
         i             Run terraform init
         v             Run terraform validate
-        f             Run terraform fmt -check
-        F             Run terraform fmt (fix)
-        d             Run terraform destroy (with confirmation)
+        f/F           Run terraform fmt check / fix
+        D             Run terraform destroy (plan → review → destroy)
         P             Show providers
+        R             Recall last dismissed plan
+        W             Multi-workspace plan (parallel across workspaces)
 
-    State Management:
-        t             Taint selected resource
-        u             Untaint selected resource
+    Plan Review:
+        y             Confirm apply/destroy
+        esc/q         Dismiss (saves plan for R recall)
+        n/N           Next/previous resource change
+        f             Toggle focused single-resource view
+        z             Toggle compact diff (collapse unchanged heredocs)
+        c             Copy current resource diff to clipboard
 
-    Workspace & Vars:
-        Enter         Switch workspace (when selected)
-        Enter/Space   Toggle var-file selection
+    Multi-Workspace (W):
+        j/k           Select workspace
+        d/u           Page down/up output
+        y             Apply selected workspace
+        A             Apply ALL with changes (sequential)
+        esc           Close / cancel
+
+    Context Keys (panel-specific):
+        e             Edit file / jump to resource declaration
+        s             Refresh state show (Resources)
+        s             Toggle skip-apply (Workspaces, persisted to .lazytf.yaml)
+        t/u           Taint/untaint resource (Resources)
+        x             Remove from state / delete workspace
+        T             Targeted plan → apply (Resources, Modules)
+        o             Open module directory (Modules)
+        /             Filter workspaces (Workspaces)
+        n             Create new workspace (Workspaces)
+
+    Views:
+        G             Dependency graph (from left pane)
+        l             Toggle command log
+        r             Refresh all data
 
     General:
-        r             Refresh data
-        l             Toggle command log
         ?             Toggle help
         q/Ctrl+C      Quit`)
+}
+
+// cleanStalePlanFiles removes lazytf plan files in the temp directory that
+// are older than 24 hours. These are orphaned from crashed sessions.
+func cleanStalePlanFiles() {
+	tmpDir := os.TempDir()
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "lazytf-") && strings.HasSuffix(name, ".tfplan") {
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				os.Remove(filepath.Join(tmpDir, name))
+			}
+		}
+	}
 }

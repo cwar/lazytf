@@ -17,7 +17,7 @@ func busyMsg() string {
 // must not run concurrently. These keys are blocked when isBusy() is true.
 func isOperationKey(key string) bool {
 	switch key {
-	case "a", "p", "i", "v", "f", "F", "D", "P", "r", "R":
+	case "a", "p", "i", "v", "f", "F", "D", "P", "r", "R", "W":
 		return true
 	}
 	return false

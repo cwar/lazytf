@@ -60,10 +60,12 @@ func extractActiveANSI(s string) string {
 }
 
 // extractActiveANSICarry scans a string for ANSI SGR sequences and returns
-// the state active at the end. The bool indicates whether any SGR codes were
-// found at all — if false, the caller should carry forward the previous style.
+// the accumulated state active at the end. Multiple SGR codes (e.g. bold +
+// color) are preserved. A reset (\x1b[0m) clears all accumulated state.
+// The bool indicates whether any SGR codes were found at all — if false,
+// the caller should carry forward the previous style.
 func extractActiveANSICarry(s string) (string, bool) {
-	var lastSGR string
+	var sgrs []string
 	found := false
 	i := 0
 	for i < len(s) {
@@ -80,9 +82,9 @@ func extractActiveANSICarry(s string) (string, bool) {
 				if seq[len(seq)-1] == 'm' {
 					found = true
 					if seq == "\x1b[0m" || seq == "\x1b[m" {
-						lastSGR = "" // reset clears active style
+						sgrs = sgrs[:0] // reset clears all accumulated styles
 					} else {
-						lastSGR = seq
+						sgrs = append(sgrs, seq)
 					}
 				}
 			}
@@ -90,7 +92,7 @@ func extractActiveANSICarry(s string) (string, bool) {
 			i++
 		}
 	}
-	return lastSGR, found
+	return strings.Join(sgrs, ""), found
 }
 
 // isCSITerminator returns true if the byte terminates a CSI sequence.

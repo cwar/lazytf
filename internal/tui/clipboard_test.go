@@ -1,9 +1,47 @@
 package tui
 
 import (
+	"os"
 	"os/exec"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 )
+
+// wlCopyPIDs returns a set of currently running wl-copy PIDs.
+func wlCopyPIDs() map[int]struct{} {
+	pids := map[int]struct{}{}
+	out, err := exec.Command("pgrep", "-x", "wl-copy").Output()
+	if err != nil {
+		return pids
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if pid, err := strconv.Atoi(line); err == nil {
+			pids[pid] = struct{}{}
+		}
+	}
+	return pids
+}
+
+// killNewWlCopyProcs kills wl-copy processes that weren't in the before set.
+func killNewWlCopyProcs(before map[int]struct{}) {
+	out, err := exec.Command("pgrep", "-x", "wl-copy").Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		if _, existed := before[pid]; !existed {
+			if p, err := os.FindProcess(pid); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+			}
+		}
+	}
+}
 
 func TestClipboardCmd_FindsSomething(t *testing.T) {
 	// On any reasonable dev machine, at least one clipboard tool should exist.
@@ -32,6 +70,13 @@ func TestCopyToClipboard_ReturnsMsg(t *testing.T) {
 		t.Skip("no clipboard command available")
 	}
 
+	// Use a cleanup to kill any lingering wl-copy processes this test spawns.
+	// On Wayland, wl-copy forks and stays alive to serve paste requests;
+	// without cleanup the process holds "test content" in the clipboard
+	// indefinitely, hijacking the user's real clipboard.
+	pids := wlCopyPIDs()
+	t.Cleanup(func() { killNewWlCopyProcs(pids) })
+
 	fn := copyToClipboard("test content")
 	msg := fn()
 
@@ -53,8 +98,8 @@ func TestErrNoClipboard_Message(t *testing.T) {
 
 func TestPlanReview_CKeyCopiesResource(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planFocusView = true
-	m.planChangeCur = 0
+	m.planView.focusView = true
+	m.planView.changeCur = 0
 
 	// The 'c' key should return a non-nil command (the clipboard cmd)
 	updated := sendKey(m, "c")
@@ -79,7 +124,7 @@ func TestPlanReview_CKeyNoChanges(t *testing.T) {
 
 func TestClipboardMsg_Success(t *testing.T) {
 	m := basePlanReviewModel()
-	m.planChangeCur = 0
+	m.planView.changeCur = 0
 
 	updated, _ := m.Update(clipboardMsg{err: nil})
 	model := updated.(Model)

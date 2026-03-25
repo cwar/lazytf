@@ -179,10 +179,11 @@ func TestBusy_QuitAllowed(t *testing.T) {
 
 func TestBusy_TabAllowed(t *testing.T) {
 	m := baseBusyModel()
-	m.focus = FocusLeft
-	got := sendKey(m, "tab")
-	if got.focus != FocusRight {
-		t.Fatal("expected tab to switch focus while busy")
+	m.activePanel = PanelFiles
+	m.runner = terraform.NewRunner("/tmp")
+	got := sendSpecialKey(m, tea.KeyTab)
+	if got.activePanel != PanelResources {
+		t.Fatal("expected tab to cycle panels while busy")
 	}
 }
 
@@ -301,7 +302,7 @@ func TestBusy_WorkspaceSelectBlocked(t *testing.T) {
 	m.activePanel = PanelWorkspaces
 	m.workspace = "default"
 	m.panels[PanelWorkspaces].Items = []PanelItem{
-		{Label: "staging"},
+		{Label: "staging", Data: "staging"},
 	}
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	got := updated.(Model)

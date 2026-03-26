@@ -99,8 +99,9 @@ type Model struct {
 	lastPlanChanges     []planChange // saved parsed resource changes
 	lastPlanTitle       string       // saved detail title
 
-	// Command log
-	cmdOutput []string
+	// Command history (structured log of completed commands)
+	history cmdHistory
+	logView logState // state for the log overlay (list + detail view)
 
 	// Overlays
 	showHelp    bool

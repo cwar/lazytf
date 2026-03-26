@@ -21,19 +21,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleMultiWSKey(msg)
 	}
 
-	// --- Overlay dismissal ---
-	if m.showHelp || m.showLog || m.showGraph {
+	// --- Command history overlay (two-level: list ↔ detail) ---
+	if m.showLog {
+		return m.handleLogKey(key)
+	}
+
+	// --- Overlay dismissal (help, graph) ---
+	if m.showHelp || m.showGraph {
 		max := m.detailMaxScroll()
 		switch key {
-		case "q", "esc", "?", "l":
+		case "q", "esc", "?":
 			if m.showHelp && key == "?" {
 				m.showHelp = false
-			} else if m.showLog && key == "l" {
-				m.showLog = false
-				m.detailScroll = 0
 			} else if key == "esc" || key == "q" {
 				m.showHelp = false
-				m.showLog = false
 				m.showGraph = false
 			}
 			return m, nil
@@ -286,6 +287,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.onSelectionChangedCmd()
 	case "l":
 		m.showLog = !m.showLog
+		m.logView = logState{} // reset to list view at top
 		m.detailScroll = 0
 		return m, nil
 	case "R":

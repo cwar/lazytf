@@ -137,7 +137,7 @@ KEYBOARD SHORTCUTS:
     Views:
         b             Switch to running command output (when browsing away)
         G             Dependency graph (from left pane)
-        l             Toggle command log
+        l             Command history (browse past plans, applies, etc.)
         r             Refresh all data
 
     General:

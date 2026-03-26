@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -179,9 +180,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fullOutput := strings.Join(m.detailLines, "\n")
 			m.highlightedLines = ui.HighlightPlanOutput(fullOutput)
 			m.isHighlighted = true
-			// Log it
-			m.cmdOutput = append(m.cmdOutput, "─── "+msg.title+" ───")
-			m.cmdOutput = append(m.cmdOutput, m.detailLines...)
 		} else {
 			// Non-streamed command: set detail from output
 			isPlan := strings.Contains(msg.title, "Plan") ||
@@ -195,10 +193,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setDetailContent(msg.output, false)
 			}
 			m.detailScroll = 0
-			// Log it
-			m.cmdOutput = append(m.cmdOutput, "─── "+msg.title+" ───")
-			m.cmdOutput = append(m.cmdOutput, strings.Split(msg.output, "\n")...)
 		}
+
+		// Record in command history (deep-copy to avoid mutation)
+		recLines := make([]string, len(m.detailLines))
+		copy(recLines, m.detailLines)
+		recHL := make([]string, len(m.highlightedLines))
+		copy(recHL, m.highlightedLines)
+		rec := cmdRecord{
+			title:     msg.title,
+			workspace: m.workspace,
+			timestamp: time.Now(),
+			failed:    msg.err != nil,
+			lines:     recLines,
+			hlLines:   recHL,
+			changes:   parsePlanChanges(recLines),
+		}
+		m.history.push(rec)
 
 		// Plan review: if a plan file was saved, enter review mode
 		if m.pendingPlanFile != "" && !m.planReview {

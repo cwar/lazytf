@@ -48,6 +48,8 @@ func (m Model) handleContextKey(key string) (tea.Model, tea.Cmd, bool) {
 		return m.handleResourcesContextKey(key)
 	case PanelWorkspaces:
 		return m.handleWorkspacesContextKey(key)
+	case PanelHistory:
+		return m.handleHistoryContextKey(key)
 	case PanelVarFiles:
 		return m.handleVarFilesContextKey(key)
 	}
@@ -294,6 +296,44 @@ func (m Model) handleWorkspacesContextKey(key string) (tea.Model, tea.Cmd, bool)
 		return m, nil, true
 	}
 
+	return m, nil, false
+}
+
+// ─── History Panel ────────────────────────────────────────
+
+func (m Model) handleHistoryContextKey(key string) (tea.Model, tea.Cmd, bool) {
+	switch key {
+	case "c":
+		// Fetch runs from Terraform Cloud
+		if m.tfcClient == nil {
+			m.statusMsg = ui.WarningStyle.Render("No Terraform Cloud backend configured")
+			return m, nil, true
+		}
+		if !m.tfcClient.HasToken() {
+			m.statusMsg = ui.ErrorStyle.Render("No TFC token found — run 'terraform login' first")
+			return m, nil, true
+		}
+		m.statusMsg = ui.SpinnerLabel.Render("☁ Fetching runs from Terraform Cloud...")
+		return m, m.loadTFCRuns(), true
+
+	case "enter", " ":
+		// If selected entry is a TFC placeholder, fetch the full plan log
+		panel := m.panels[PanelHistory]
+		if item := panel.SelectedItem(); item != nil {
+			if rec, ok := item.Data.(*cmdRecord); ok {
+				if planID, runID, found := m.findTFCPlanID(rec); found {
+					// Check if we already have the full output
+					if len(rec.lines) > 1 && strings.Contains(rec.lines[1], "☁ Terraform Cloud Run") {
+						m.statusMsg = ui.SpinnerLabel.Render("☁ Fetching plan output...")
+						return m, m.loadTFCPlanLog(planID, runID, rec.title), true
+					}
+				}
+			}
+		}
+		// Not a TFC entry or already has output — focus right pane
+		m.focus = FocusRight
+		return m, nil, true
+	}
 	return m, nil, false
 }
 
@@ -592,7 +632,11 @@ func contextKeysFor(panel PanelID, m *Model) []keyHint {
 	case PanelVarFiles:
 		return []keyHint{{"e", "edit"}}
 	case PanelHistory:
-		return nil // no context keys; just browse and view output
+		var hints []keyHint
+		if m != nil && m.tfcClient != nil && m.tfcClient.HasToken() {
+			hints = append(hints, keyHint{"c", "cloud runs"})
+		}
+		return hints
 	}
 	return nil
 }

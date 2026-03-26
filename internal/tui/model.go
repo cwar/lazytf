@@ -124,6 +124,11 @@ type Model struct {
 
 	// Configuration loaded from .lazytf.yaml
 	config config.Config
+
+	// Terraform Cloud integration (nil if not using TFC backend)
+	cloudConfig *terraform.CloudConfig
+	tfcClient   *terraform.TFCClient
+	tfcRuns     []tfcRunEntry // cached TFC run entries for plan ID lookups
 }
 
 // tempPlanFile creates a unique temporary file path for saving terraform plans.
@@ -156,6 +161,13 @@ func NewModel(workDir string) Model {
 	// Load config (ignore errors — defaults are fine)
 	cfg, _ := config.Load(workDir)
 
+	// Detect Terraform Cloud backend
+	cloudCfg := terraform.ParseCloudConfig(workDir)
+	var tfcClient *terraform.TFCClient
+	if cloudCfg != nil {
+		tfcClient = terraform.NewTFCClient(cloudCfg)
+	}
+
 	m := Model{
 		runner:      runner,
 		workDir:     workDir,
@@ -165,6 +177,8 @@ func NewModel(workDir string) Model {
 		activePanel: PanelFiles,
 		spinner:     s,
 		config:      cfg,
+		cloudConfig: cloudCfg,
+		tfcClient:   tfcClient,
 		detailTitle: "Welcome",
 		detailLines: []string{
 			"",
@@ -521,6 +535,15 @@ func (m *Model) showStatusDetail() {
 	if m.selectedVarFile != "" {
 		lines = append(lines, "")
 		lines = append(lines, "  Active var-file: "+shortPath(m.selectedVarFile))
+	}
+	if m.cloudConfig != nil {
+		lines = append(lines, "")
+		lines = append(lines, "  ☁ Cloud:     "+m.cloudConfig.Organization+" ("+m.cloudConfig.Hostname+")")
+		if m.tfcClient != nil && m.tfcClient.HasToken() {
+			lines = append(lines, "  ☁ Token:     ✓ authenticated")
+		} else {
+			lines = append(lines, "  ☁ Token:     ✗ run 'terraform login'")
+		}
 	}
 	lines = append(lines, "")
 	lines = append(lines, "  Press ? for keyboard shortcuts")

@@ -142,6 +142,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.startNextMultiWSApply()
 		return m, cmd
 
+	case tfcRunsLoadedMsg:
+		m.handleTFCRunsLoaded(msg)
+		return m, nil
+
+	case tfcPlanLoadedMsg:
+		m.handleTFCPlanLoaded(msg)
+		return m, nil
+
 	case clipboardMsg:
 		if msg.err != nil {
 			m.statusMsg = ui.ErrorStyle.Render("Clipboard: " + msg.err.Error())

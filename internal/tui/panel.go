@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/cwar/lazytf/internal/ui"
 )
 
@@ -141,9 +142,16 @@ func (p *SubPanel) Render(width int, isActive, isLeftFocused bool) string {
 		}
 		line += item.Label
 
-		// Pad to width
+		// Truncate or pad to width
 		lineWidth := lipgloss.Width(line)
-		if lineWidth < width {
+		if lineWidth > width {
+			line = ansi.Truncate(line, width-1, "…")
+			// Re-pad after truncation (Truncate may leave it slightly short)
+			lineWidth = lipgloss.Width(line)
+			if lineWidth < width {
+				line += strings.Repeat(" ", width-lineWidth)
+			}
+		} else if lineWidth < width {
 			line += strings.Repeat(" ", width-lineWidth)
 		}
 

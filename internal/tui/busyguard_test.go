@@ -161,11 +161,11 @@ func TestBusy_HelpOverlayAllowed(t *testing.T) {
 	}
 }
 
-func TestBusy_LogOverlayAllowed(t *testing.T) {
+func TestBusy_HistoryPanelAllowed(t *testing.T) {
 	m := baseBusyModel()
 	got := sendKey(m, "l")
-	if !got.showLog {
-		t.Fatal("expected log overlay to toggle while busy")
+	if got.activePanel != PanelHistory {
+		t.Fatal("expected l to jump to history panel while busy")
 	}
 }
 

@@ -38,9 +38,14 @@ func (m Model) handleContextKey(key string) (tea.Model, tea.Cmd, bool) {
 	case PanelFiles:
 		return m.handleFilesContextKey(key)
 	case PanelResources:
+		// Dispatch based on selected item type (resource or module header)
+		panel := m.panels[PanelResources]
+		if item := panel.SelectedItem(); item != nil {
+			if _, ok := item.Data.(terraform.ModuleCall); ok {
+				return m.handleModulesContextKey(key)
+			}
+		}
 		return m.handleResourcesContextKey(key)
-	case PanelModules:
-		return m.handleModulesContextKey(key)
 	case PanelWorkspaces:
 		return m.handleWorkspacesContextKey(key)
 	case PanelVarFiles:
@@ -160,7 +165,7 @@ func (m Model) handleResourcesContextKey(key string) (tea.Model, tea.Cmd, bool) 
 // ─── Modules Panel ───────────────────────────────────────
 
 func (m Model) handleModulesContextKey(key string) (tea.Model, tea.Cmd, bool) {
-	panel := m.panels[PanelModules]
+	panel := m.panels[PanelResources]
 
 	switch key {
 	case "e":
@@ -336,12 +341,7 @@ func (m Model) handleRightPaneEdit() (tea.Model, tea.Cmd) {
 				if path != "" {
 					return m, m.openEditor(path, line)
 				}
-			}
-		}
-	case PanelModules:
-		panel := m.panels[PanelModules]
-		if item := panel.SelectedItem(); item != nil {
-			if mod, ok := item.Data.(terraform.ModuleCall); ok {
+			} else if mod, ok := item.Data.(terraform.ModuleCall); ok {
 				if mod.SourceFile != "" {
 					path := mod.SourceFile
 					if !filepath.IsAbs(path) {
@@ -557,18 +557,25 @@ func contextKeysFor(panel PanelID, m *Model) []keyHint {
 	case PanelFiles:
 		return []keyHint{{"e", "edit"}}
 	case PanelResources:
+		// Show context-appropriate hints based on selected item type
+		if m != nil {
+			panel := m.panels[PanelResources]
+			if item := panel.SelectedItem(); item != nil {
+				if _, ok := item.Data.(terraform.ModuleCall); ok {
+					return []keyHint{
+						{"e", "edit"},
+						{"o", "open dir"},
+						{"T", "target"},
+					}
+				}
+			}
+		}
 		return []keyHint{
 			{"e", "file"},
 			{"s", "show"},
 			{"t", "taint"},
 			{"u", "untaint"},
 			{"x", "rm"},
-			{"T", "target"},
-		}
-	case PanelModules:
-		return []keyHint{
-			{"e", "edit"},
-			{"o", "open dir"},
 			{"T", "target"},
 		}
 	case PanelWorkspaces:
@@ -584,6 +591,8 @@ func contextKeysFor(panel PanelID, m *Model) []keyHint {
 		}
 	case PanelVarFiles:
 		return []keyHint{{"e", "edit"}}
+	case PanelHistory:
+		return nil // no context keys; just browse and view output
 	}
 	return nil
 }

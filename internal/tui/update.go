@@ -210,6 +210,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			changes:   parsePlanChanges(recLines),
 		}
 		m.history.push(rec)
+		m.rebuildHistoryPanel()
 
 		// Plan review: if a plan file was saved, enter review mode
 		if m.pendingPlanFile != "" && !m.planReview {

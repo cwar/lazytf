@@ -156,139 +156,87 @@ func TestCmdHistory_MultipleCommandsOrdered(t *testing.T) {
 	}
 }
 
-// ─── Log overlay: list view ──────────────────────────────
+// ─── History panel tests ─────────────────────────────────
 
-func TestLogOverlay_ShowsList(t *testing.T) {
+func TestHistoryPanel_ShowsEntries(t *testing.T) {
 	m := testModel()
 	m.workspace = "dev"
 
-	// Add some history
 	m.history.push(cmdRecord{
 		title: "Plan", workspace: "dev", failed: false,
 		timestamp: time.Now().Add(-2 * time.Minute),
-		lines: []string{"Plan: 1 to add"},
+		lines:     []string{"Plan: 1 to add"},
 	})
 	m.history.push(cmdRecord{
 		title: "Apply", workspace: "dev", failed: true,
 		timestamp: time.Now().Add(-1 * time.Minute),
-		lines: []string{"Error: apply failed"},
+		lines:     []string{"Error: apply failed"},
 	})
 
-	// Open log
-	m.showLog = true
-	view := m.View()
+	m.rebuildHistoryPanel()
+	panel := m.panels[PanelHistory]
 
-	if !strings.Contains(view, "Plan") {
-		t.Error("log overlay should show Plan entry")
+	if len(panel.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(panel.Items))
 	}
-	if !strings.Contains(view, "Apply") {
-		t.Error("log overlay should show Apply entry")
+	if !strings.Contains(panel.Items[0].Label, "Apply") {
+		t.Errorf("first item should be Apply, got %q", panel.Items[0].Label)
+	}
+	if panel.Items[0].Icon != "✗" {
+		t.Errorf("failed item should have ✗ icon, got %q", panel.Items[0].Icon)
+	}
+	if panel.Items[1].Icon != "✓" {
+		t.Errorf("success item should have ✓ icon, got %q", panel.Items[1].Icon)
 	}
 }
 
-func TestLogOverlay_EnterViewsEntry(t *testing.T) {
+func TestHistoryPanel_SelectShowsOutput(t *testing.T) {
 	m := testModel()
-	m.workspace = "dev"
 	m.history.push(cmdRecord{
-		title: "Plan", workspace: "dev",
-		lines:   []string{"Plan output line 1", "Plan output line 2"},
-		hlLines: []string{"Plan output line 1", "Plan output line 2"},
+		title:     "Plan",
+		workspace: "dev",
+		lines:     []string{"Plan output line 1", "Plan output line 2"},
+		hlLines:   []string{"Plan output line 1", "Plan output line 2"},
 	})
+	m.rebuildHistoryPanel()
+	m.activePanel = PanelHistory
+	m.panels[PanelHistory].Cursor = 0
 
-	m.showLog = true
-	m.logView.cursor = 0
+	m.onSelectionChanged()
 
-	// Press enter to view the entry
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.detailLines) != 2 {
+		t.Fatalf("expected 2 detail lines, got %d", len(m.detailLines))
+	}
+	if m.detailLines[0] != "Plan output line 1" {
+		t.Errorf("detail line = %q", m.detailLines[0])
+	}
+}
+
+func TestHistoryPanel_LKeyJumpsToPanel(t *testing.T) {
+	m := testModel()
+	m.activePanel = PanelFiles
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	m = result.(Model)
 
-	if !m.logView.viewing {
-		t.Fatal("should be viewing an entry after enter")
+	if m.activePanel != PanelHistory {
+		t.Fatalf("l should jump to history panel, got panel %d", m.activePanel)
 	}
 }
 
-func TestLogOverlay_EscFromViewReturnsToList(t *testing.T) {
+func TestHistoryPanel_RebuildOnCmdDone(t *testing.T) {
 	m := testModel()
-	m.history.push(cmdRecord{title: "Plan", lines: []string{"output"}})
-	m.showLog = true
-	m.logView.viewing = true
+	m.isLoading = true
+	m.workspace = "dev"
+	m.streamLines = []string{"plan output"}
+	m.streamHLLines = []string{"plan output"}
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	result, _ := m.Update(cmdDoneMsg{title: "Plan", streamed: true})
 	m = result.(Model)
 
-	if m.logView.viewing {
-		t.Fatal("esc should return to list view")
-	}
-	if !m.showLog {
-		t.Fatal("log should still be open")
-	}
-}
-
-func TestLogOverlay_EscFromListCloses(t *testing.T) {
-	m := testModel()
-	m.showLog = true
-	m.logView.viewing = false
-
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = result.(Model)
-
-	if m.showLog {
-		t.Fatal("esc from list should close the log overlay")
-	}
-}
-
-func TestLogOverlay_NavigateList(t *testing.T) {
-	m := testModel()
-	m.history.push(cmdRecord{title: "Plan 1"})
-	m.history.push(cmdRecord{title: "Plan 2"})
-	m.history.push(cmdRecord{title: "Plan 3"})
-	m.showLog = true
-	m.logView.cursor = 0
-
-	// Move down
-	m = sendKey(m, "j")
-	if m.logView.cursor != 1 {
-		t.Fatalf("cursor should be 1, got %d", m.logView.cursor)
-	}
-
-	// Move down again
-	m = sendKey(m, "j")
-	if m.logView.cursor != 2 {
-		t.Fatalf("cursor should be 2, got %d", m.logView.cursor)
-	}
-
-	// Move up
-	m = sendKey(m, "k")
-	if m.logView.cursor != 1 {
-		t.Fatalf("cursor should be 1, got %d", m.logView.cursor)
-	}
-}
-
-func TestLogOverlay_QClosesList(t *testing.T) {
-	m := testModel()
-	m.showLog = true
-	m.logView.viewing = false
-
-	m = sendKey(m, "q")
-
-	if m.showLog {
-		t.Fatal("q from list should close the log overlay")
-	}
-}
-
-func TestLogOverlay_QFromViewReturnsToList(t *testing.T) {
-	m := testModel()
-	m.history.push(cmdRecord{title: "Plan", lines: []string{"output"}})
-	m.showLog = true
-	m.logView.viewing = true
-
-	m = sendKey(m, "q")
-
-	if m.logView.viewing {
-		t.Fatal("q should return to list view")
-	}
-	if !m.showLog {
-		t.Fatal("log should still be open")
+	panel := m.panels[PanelHistory]
+	if len(panel.Items) != 1 {
+		t.Fatalf("history panel should have 1 item after command, got %d", len(panel.Items))
 	}
 }
 

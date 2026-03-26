@@ -101,11 +101,9 @@ type Model struct {
 
 	// Command history (structured log of completed commands)
 	history cmdHistory
-	logView logState // state for the log overlay (list + detail view)
 
 	// Overlays
 	showHelp    bool
-	showLog     bool
 	showGraph   bool
 	showConfirm bool
 	confirmAction string
@@ -422,16 +420,30 @@ func (m *Model) onSelectionChanged() {
 		if r, ok := item.Data.(terraform.Resource); ok {
 			m.detailTitle = "Loading: " + r.Address
 			m.setDetailPlain("Loading state for " + r.Address + "...")
+		} else if mod, ok := item.Data.(terraform.ModuleCall); ok {
+			m.showModuleDetail(mod)
 		}
 
-	case PanelModules:
+	case PanelHistory:
 		if item == nil {
-			m.detailTitle = "Modules"
-			m.setDetailPlain("No modules found")
+			m.detailTitle = "History"
+			m.setDetailPlain("No commands run yet")
 			return
 		}
-		if mod, ok := item.Data.(terraform.ModuleCall); ok {
-			m.showModuleDetail(mod)
+		if rec, ok := item.Data.(*cmdRecord); ok {
+			status := "✓"
+			if rec.failed {
+				status = "✗"
+			}
+			m.detailTitle = fmt.Sprintf("%s %s (%s)", status, rec.title, rec.workspace)
+			if len(rec.hlLines) == len(rec.lines) && len(rec.hlLines) > 0 {
+				m.detailLines = rec.lines
+				m.highlightedLines = rec.hlLines
+				m.isHighlighted = true
+			} else {
+				m.setDetailPlain(strings.Join(rec.lines, "\n"))
+			}
+			m.detailScroll = 0
 		}
 
 	case PanelWorkspaces:
@@ -625,9 +637,9 @@ func (m *Model) rebuildAllPanels() {
 	m.rebuildStatusPanel()
 	m.rebuildFilesPanel()
 	m.rebuildResourcesPanel()
-	m.rebuildModulesPanel()
 	m.rebuildWorkspacesPanel()
 	m.rebuildVarFilesPanel()
+	m.rebuildHistoryPanel()
 }
 
 func (m *Model) rebuildStatusPanel() {
@@ -694,42 +706,84 @@ func (m *Model) rebuildResourcesPanel() {
 	oldCursor := p.Cursor
 	p.Items = nil
 
-	for _, r := range m.resources {
-		label := ""
-		if r.Module != "" {
-			label = r.Module + "."
-		}
-		label += r.Type + "." + r.Name
-		p.Items = append(p.Items, PanelItem{
-			Label: label,
-			Icon:  "◆",
-			Data:  r,
-		})
-	}
-
-	if oldCursor < len(p.Items) {
-		p.Cursor = oldCursor
-	} else if len(p.Items) > 0 {
-		p.Cursor = 0
-	}
-}
-
-func (m *Model) rebuildModulesPanel() {
-	p := m.panels[PanelModules]
-	oldCursor := p.Cursor
-	p.Items = nil
-
+	// Build module index: module name → ModuleCall
+	modMap := make(map[string]terraform.ModuleCall)
 	for _, mod := range m.modules {
-		display := mod.ModuleSourceDisplay()
-		label := mod.Name
-		if display != "" {
-			label += " (" + display + ")"
+		modMap["module."+mod.Name] = mod
+	}
+
+	// Group resources by module
+	type modGroup struct {
+		mod       *terraform.ModuleCall // nil for root resources
+		resources []terraform.Resource
+	}
+
+	groupOrder := []string{""} // "" = root module first
+	groups := map[string]*modGroup{"": {}}
+	for _, r := range m.resources {
+		key := r.Module
+		if _, ok := groups[key]; !ok {
+			groups[key] = &modGroup{}
+			groupOrder = append(groupOrder, key)
 		}
-		p.Items = append(p.Items, PanelItem{
-			Label: label,
-			Icon:  "📦",
-			Data:  mod,
-		})
+		groups[key].resources = append(groups[key].resources, r)
+	}
+
+	// Attach module metadata to groups
+	for key := range groups {
+		if mod, ok := modMap[key]; ok {
+			groups[key].mod = &mod
+		}
+	}
+
+	// Also add modules that have no resources in state yet
+	for _, mod := range m.modules {
+		key := "module." + mod.Name
+		if _, ok := groups[key]; !ok {
+			modCopy := mod
+			groups[key] = &modGroup{mod: &modCopy}
+			groupOrder = append(groupOrder, key)
+		}
+	}
+
+	// Render: root resources first, then module groups
+	for _, key := range groupOrder {
+		g := groups[key]
+		if key != "" {
+			// Module header
+			label := strings.TrimPrefix(key, "module.")
+			if g.mod != nil {
+				display := g.mod.ModuleSourceDisplay()
+				if display != "" {
+					label += " (" + display + ")"
+				}
+				p.Items = append(p.Items, PanelItem{
+					Label: label,
+					Icon:  "📦",
+					Data:  *g.mod,
+				})
+			} else {
+				// Module in state but not in HCL (e.g., removed module)
+				p.Items = append(p.Items, PanelItem{
+					Label: label,
+					Icon:  "📦",
+					Dim:   true,
+				})
+			}
+		}
+		// Resources under this module
+		for _, r := range g.resources {
+			label := r.Type + "." + r.Name
+			indent := ""
+			if key != "" {
+				indent = "  "
+			}
+			p.Items = append(p.Items, PanelItem{
+				Label: indent + label,
+				Icon:  "◆",
+				Data:  r,
+			})
+		}
 	}
 
 	if oldCursor < len(p.Items) {
@@ -856,6 +910,37 @@ func (m *Model) rebuildVarFilesPanel() {
 			Label: label,
 			Icon:  icon,
 			Data:  f,
+		})
+	}
+
+	if oldCursor < len(p.Items) {
+		p.Cursor = oldCursor
+	} else if len(p.Items) > 0 {
+		p.Cursor = 0
+	}
+}
+
+func (m *Model) rebuildHistoryPanel() {
+	p := m.panels[PanelHistory]
+	oldCursor := p.Cursor
+	p.Items = nil
+
+	for i := 0; i < m.history.len(); i++ {
+		rec := m.history.get(i)
+		icon := "✓"
+		if rec.failed {
+			icon = "✗"
+		}
+		ws := rec.workspace
+		if ws == "" {
+			ws = "default"
+		}
+		age := formatAge(rec.timestamp)
+		label := fmt.Sprintf("%s  %s  %s", rec.title, ws, age)
+		p.Items = append(p.Items, PanelItem{
+			Label: label,
+			Icon:  icon,
+			Data:  rec,
 		})
 	}
 

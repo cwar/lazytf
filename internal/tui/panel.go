@@ -14,11 +14,11 @@ type PanelID int
 const (
 	PanelStatus PanelID = iota
 	PanelFiles
-	PanelResources
-	PanelModules
+	PanelResources // merged Resources + Modules (modules as group headers)
 	PanelWorkspaces
 	PanelVarFiles
-	PanelCount // sentinel — number of panels
+	PanelHistory // command history (recent plans, applies, etc.)
+	PanelCount   // sentinel — number of panels
 )
 
 // panelMeta defines static panel metadata.
@@ -32,10 +32,10 @@ type panelMeta struct {
 var panelDefs = map[PanelID]panelMeta{
 	PanelStatus:     {"✓", "Status", 1, 0},
 	PanelFiles:      {"📄", "Files", 3, 3},
-	PanelResources:  {"🏗", "Resources", 3, 3},
-	PanelModules:    {"📦", "Modules", 2, 1},
+	PanelResources:  {"🏗", "Resources", 3, 4},
 	PanelWorkspaces: {"📁", "Workspaces", 2, 1},
 	PanelVarFiles:   {"⚙", "Var Files", 2, 1},
+	PanelHistory:    {"📋", "History", 2, 2},
 }
 
 // SubPanel holds the state of one stacked panel.

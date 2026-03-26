@@ -123,21 +123,22 @@ KEYBOARD SHORTCUTS:
         A             Apply ALL with changes (sequential)
         esc           Close / cancel
 
+    Panels: [1] Status [2] Files [3] Resources [4] Workspaces [5] Var Files [6] History
+
     Context Keys (panel-specific):
-        e             Edit file / jump to resource declaration
-        s             Refresh state show (Resources)
-        s             Toggle skip-apply (Workspaces, persisted to .lazytf.yaml)
+        e             Edit file / jump to resource / edit module source
+        s             Refresh state show (Resources) / toggle skip-apply (Workspaces)
         t/u           Taint/untaint resource (Resources)
         x             Remove from state / delete workspace
-        T             Targeted plan → apply (Resources, Modules)
-        o             Open module directory (Modules)
+        T             Targeted plan → apply (Resources/Modules)
+        o             Open module directory (Modules in Resources panel)
         /             Filter workspaces (Workspaces)
         n             Create new workspace (Workspaces)
 
     Views:
         b             Switch to running command output (when browsing away)
         G             Dependency graph (from left pane)
-        l             Command history (browse past plans, applies, etc.)
+        l             Jump to command history panel
         r             Refresh all data
 
     General:

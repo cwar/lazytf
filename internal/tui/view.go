@@ -129,10 +129,7 @@ func (m Model) renderDetailPane(width, height int) string {
 	var hlLines []string
 	useOverlayHL := false
 
-	if m.showLog {
-		sourceLines, hlLines = m.logSourceLines()
-		useOverlayHL = len(hlLines) == len(sourceLines) && len(hlLines) > 0
-	} else if m.showGraph {
+	if m.showGraph {
 		sourceLines = m.detailLines
 	} else if m.planReview {
 		// Plan review: use planView which handles focus + compact
@@ -167,23 +164,7 @@ func (m Model) renderDetailPane(width, height int) string {
 	titleLine := title + ui.DimItem.Render(strings.Repeat("─", titlePad)) + scrollInfo
 
 	// Override title for overlays
-	if m.showLog {
-		logTitle := " Command History "
-		if m.logView.viewing {
-			if rec := m.history.get(m.logView.cursor); rec != nil {
-				status := "✓"
-				if rec.failed {
-					status = "✗"
-				}
-				logTitle = fmt.Sprintf(" %s %s (%s) ", status, rec.title, rec.workspace)
-			}
-		}
-		pad := width - len(logTitle)
-		if pad < 0 {
-			pad = 0
-		}
-		titleLine = ui.PanelTitle.Render(logTitle) + ui.DimItem.Render(strings.Repeat("─", pad))
-	} else if m.showGraph {
+	if m.showGraph {
 		titleLine = ui.PanelTitle.Render(" Dependency Graph ") + ui.DimItem.Render(strings.Repeat("─", width-20))
 		if width-20 < 0 {
 			titleLine = ui.PanelTitle.Render(" Graph ")
@@ -248,22 +229,6 @@ func (m Model) renderStatusBar() string {
 }
 
 func (m Model) renderHelpHint() string {
-	if m.showLog {
-		if m.logView.viewing {
-			hint := ui.PanelTitle.Render("▶ Command Output") + "  " +
-				ui.HelpKey.Render("esc/q") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("back to list") + "  " +
-				ui.HelpKey.Render("j/k") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("scroll") + "  " +
-				ui.HelpKey.Render("d/u") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("page dn/up") + "  " +
-				ui.HelpKey.Render("g/G") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("top/bottom")
-			return hint
-		}
-		hint := ui.PanelTitle.Render("▶ Command History") + "  " +
-			ui.HelpKey.Render("enter") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("view output") + "  " +
-			ui.HelpKey.Render("j/k") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("navigate") + "  " +
-			ui.HelpKey.Render("esc/q") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("close")
-		return hint
-	}
-
 	if m.applyResult {
 		title := m.detailTitle
 		titleStyle := ui.SuccessStyle
@@ -336,7 +301,7 @@ func (m Model) renderHelpHint() string {
 			{"W", "multi-ws"},
 			{"G", "graph"},
 			{"f", "fmt"},
-			{"l", "log"},
+			{"l", "history"},
 			{"r", "refresh"},
 			{"1-6", "panels"},
 			{"tab", "next panel"},
@@ -441,31 +406,20 @@ func (m Model) renderHelp() string {
 		{"Views", []struct{ key, desc string }{
 			{"b", "Switch to running command output (when browsing away)"},
 			{"G", "Dependency graph (from left pane)"},
-			{"l", "Command history (browse past commands)"},
+			{"l", "Jump to command history panel"},
 			{"r", "Refresh all data"},
-		}},
-		{"Command History (l)", []struct{ key, desc string }{
-			{"j/k", "Navigate command list"},
-			{"enter", "View command output"},
-			{"esc/q", "Back to list / close"},
-			{"g/G", "Top/bottom (in output view)"},
-			{"d/u", "Page down/up (in output view)"},
 		}},
 		{"📄 Files", []struct{ key, desc string }{
 			{"e", "Edit file in $EDITOR"},
 		}},
-		{"🏗  Resources", []struct{ key, desc string }{
-			{"e", "Jump to declaring .tf file"},
-			{"s", "Refresh state show"},
+		{"🏗  Resources (includes modules)", []struct{ key, desc string }{
+			{"e", "Jump to declaring file / edit module source"},
+			{"s", "Refresh state show (resources only)"},
 			{"t", "Taint resource"},
 			{"u", "Untaint resource"},
 			{"x", "Remove from state"},
 			{"T", "Targeted plan → apply"},
-		}},
-		{"📦 Modules", []struct{ key, desc string }{
-			{"e", "Edit module source file"},
-			{"o", "Open module directory"},
-			{"T", "Targeted plan → apply"},
+			{"o", "Open module directory (modules only)"},
 		}},
 		{"📁 Workspaces", []struct{ key, desc string }{
 			{"/", "Filter workspaces (e.g. dev, prod)"},

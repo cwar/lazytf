@@ -21,11 +21,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleMultiWSKey(msg)
 	}
 
-	// --- Command history overlay (two-level: list ↔ detail) ---
-	if m.showLog {
-		return m.handleLogKey(key)
-	}
-
 	// --- Overlay dismissal (help, graph) ---
 	if m.showHelp || m.showGraph {
 		max := m.detailMaxScroll()
@@ -100,7 +95,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scrollPageUp()
 			return m, nil
 		case "l":
-			// Allow log overlay
+			// Allow jumping to history panel
 		case "?":
 			// Allow help overlay
 		case "ctrl+c":
@@ -286,10 +281,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.onSelectionChanged()
 		return m, m.onSelectionChangedCmd()
 	case "l":
-		m.showLog = !m.showLog
-		m.logView = logState{} // reset to list view at top
-		m.detailScroll = 0
-		return m, nil
+		// Jump to command history panel
+		m.activePanel = PanelHistory
+		m.focus = FocusLeft
+		m.onSelectionChanged()
+		return m, m.onSelectionChangedCmd()
 	case "R":
 		if m.isLoading {
 			m.statusMsg = busyMsg()
@@ -345,17 +341,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.onSelectionChanged()
 		return m, m.onSelectionChangedCmd()
 	case "4":
-		m.activePanel = PanelModules
-		m.focus = FocusLeft
-		m.onSelectionChanged()
-		return m, m.onSelectionChangedCmd()
-	case "5":
 		m.activePanel = PanelWorkspaces
 		m.focus = FocusLeft
 		m.onSelectionChanged()
 		return m, m.onSelectionChangedCmd()
-	case "6":
+	case "5":
 		m.activePanel = PanelVarFiles
+		m.focus = FocusLeft
+		m.onSelectionChanged()
+		return m, m.onSelectionChangedCmd()
+	case "6":
+		m.activePanel = PanelHistory
 		m.focus = FocusLeft
 		m.onSelectionChanged()
 		return m, m.onSelectionChangedCmd()
@@ -579,8 +575,8 @@ func (m Model) handlePanelAction() (tea.Model, tea.Cmd) {
 		m.focus = FocusRight
 		return m, nil
 
-	case PanelModules:
-		// Enter focuses the right pane
+	case PanelHistory:
+		// Enter focuses the right pane to scroll command output
 		m.focus = FocusRight
 		return m, nil
 	}

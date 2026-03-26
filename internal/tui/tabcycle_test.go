@@ -32,7 +32,7 @@ func TestTab_CyclesForwardFromFiles(t *testing.T) {
 }
 
 func TestTab_CyclesForwardWraps(t *testing.T) {
-	m := tabTestModel(PanelVarFiles)
+	m := tabTestModel(PanelHistory)
 	got := sendSpecialKey(m, tea.KeyTab)
 	if got.activePanel != PanelStatus {
 		t.Fatalf("expected Status panel (wrap), got %d", got.activePanel)
@@ -43,8 +43,8 @@ func TestTab_FromRightFocus_CyclesAndSetsFocusLeft(t *testing.T) {
 	m := tabTestModel(PanelResources)
 	m.focus = FocusRight
 	got := sendSpecialKey(m, tea.KeyTab)
-	if got.activePanel != PanelModules {
-		t.Fatalf("expected Modules panel, got %d", got.activePanel)
+	if got.activePanel != PanelWorkspaces {
+		t.Fatalf("expected Workspaces panel, got %d", got.activePanel)
 	}
 	if got.focus != FocusLeft {
 		t.Fatal("expected focus to move to left after Tab")
@@ -64,8 +64,8 @@ func TestShiftTab_CyclesBackward(t *testing.T) {
 func TestShiftTab_WrapsFromStatus(t *testing.T) {
 	m := tabTestModel(PanelStatus)
 	got := sendSpecialKey(m, tea.KeyShiftTab)
-	if got.activePanel != PanelVarFiles {
-		t.Fatalf("expected VarFiles panel (wrap), got %d", got.activePanel)
+	if got.activePanel != PanelHistory {
+		t.Fatalf("expected History panel (wrap), got %d", got.activePanel)
 	}
 }
 

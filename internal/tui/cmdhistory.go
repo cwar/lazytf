@@ -44,12 +44,4 @@ func (h *cmdHistory) get(i int) *cmdRecord {
 	return &h.entries[i]
 }
 
-// logState tracks the two-level command log overlay:
-// Level 1: browsing the list of past commands
-// Level 2: viewing a single command's full output
-type logState struct {
-	cursor   int  // selected entry in the list
-	scroll   int  // scroll offset in list view
-	viewing  bool // true when viewing a single entry's output
-	viewScroll int // scroll offset within the viewed entry's output
-}
+

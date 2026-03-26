@@ -40,20 +40,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.followOutput = true
 		m.applyResult = false
 		m.planHighlighter = ui.NewPlanHighlighter()
+		m.streamLines = nil
+		m.streamHLLines = nil
+		m.viewingStream = true
 		m.focus = FocusRight // auto-focus detail pane to allow scrolling
 		return m, nil
 
 	case cmdStreamLineMsg:
-		m.detailLines = append(m.detailLines, msg.line)
-		m.highlightedLines = append(m.highlightedLines, m.planHighlighter.HighlightLine(msg.line))
-		// Auto-scroll to follow output (unless user scrolled up)
-		if m.followOutput {
-			visH := m.detailVisibleHeight()
-			if visH < 1 {
-				visH = 1
-			}
-			if len(m.detailLines) > visH {
-				m.detailScroll = len(m.detailLines) - visH
+		// Always buffer the streaming output — this survives navigation.
+		hlLine := m.planHighlighter.HighlightLine(msg.line)
+		m.streamLines = append(m.streamLines, msg.line)
+		m.streamHLLines = append(m.streamHLLines, hlLine)
+
+		// Only update the display if the user is viewing the stream.
+		// If they navigated to a file, don't corrupt detailLines.
+		if m.viewingStream {
+			m.detailLines = append(m.detailLines, msg.line)
+			m.highlightedLines = append(m.highlightedLines, hlLine)
+			// Auto-scroll to follow output (unless user scrolled up)
+			if m.followOutput {
+				visH := m.detailVisibleHeight()
+				if visH < 1 {
+					visH = 1
+				}
+				if len(m.detailLines) > visH {
+					m.detailScroll = len(m.detailLines) - visH
+				}
 			}
 		}
 		return m, readStreamLine(msg.title, msg.ch, msg.cmdErr)
@@ -155,7 +167,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detailTitle = msg.title
 
 		if msg.streamed {
-			// Output was already streamed line-by-line into detailLines.
+			// Restore from the stream buffer — it's the authoritative source.
+			// The user may have navigated away, which replaced detailLines
+			// with file content. The buffer always has the full stream.
+			if len(m.streamLines) > 0 {
+				m.detailLines = m.streamLines
+			}
+			m.viewingStream = false // buffer consumed — no longer "streaming"
+
 			// Re-highlight the full output for better plan summary rendering.
 			fullOutput := strings.Join(m.detailLines, "\n")
 			m.highlightedLines = ui.HighlightPlanOutput(fullOutput)
@@ -184,10 +203,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Plan review: if a plan file was saved, enter review mode
 		if m.pendingPlanFile != "" && !m.planReview {
 			if msg.err != nil {
-				// Plan failed — clean up
+				// Plan failed — clean up the plan file but pin the output
+				// so the user can read the error. Same pattern as applyResult.
 				os.Remove(m.pendingPlanFile)
 				m.pendingPlanFile = ""
 				m.planIsDestroy = false
+				m.applyResult = true
+				m.statusMsg = ui.ErrorStyle.Render("✗ " + msg.title + " failed — press esc to dismiss")
 			} else {
 				// Plan succeeded — enter review mode
 				m.planReview = true

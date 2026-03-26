@@ -135,6 +135,7 @@ KEYBOARD SHORTCUTS:
         n             Create new workspace (Workspaces)
 
     Views:
+        b             Switch to running command output (when browsing away)
         G             Dependency graph (from left pane)
         l             Toggle command log
         r             Refresh all data

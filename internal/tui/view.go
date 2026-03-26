@@ -241,7 +241,11 @@ func (m Model) renderStatusBar() string {
 func (m Model) renderHelpHint() string {
 	if m.applyResult {
 		title := m.detailTitle
-		hint := ui.SuccessStyle.Render("▶ "+title+" result") + "  " +
+		titleStyle := ui.SuccessStyle
+		if strings.Contains(m.statusMsg, "failed") {
+			titleStyle = ui.ErrorStyle
+		}
+		hint := titleStyle.Render("▶ "+title+" result") + "  " +
 			ui.HelpKey.Render("esc") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("dismiss") + "  " +
 			ui.HelpKey.Render("j/k") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("scroll") + "  " +
 			ui.HelpKey.Render("d/u") + ui.HelpSep.Render(":") + ui.HelpDesc.Render("page dn/up") + "  " +
@@ -327,6 +331,11 @@ func (m Model) renderHelpHint() string {
 		}
 	}
 
+	// Show stream buffer hint when a command is running and user browsed away
+	if m.isLoading && !m.viewingStream && len(m.streamLines) > 0 {
+		globalKeys = append([]struct{ key, desc string }{{"b", "output"}}, globalKeys...)
+	}
+
 	// Show recall hint if a saved plan is available
 	if m.hasLastPlan() {
 		globalKeys = append([]struct{ key, desc string }{{"R", "recall plan"}}, globalKeys...)
@@ -405,6 +414,7 @@ func (m Model) renderHelp() string {
 			{"g/G", "Top/bottom"},
 		}},
 		{"Views", []struct{ key, desc string }{
+			{"b", "Switch to running command output (when browsing away)"},
 			{"G", "Dependency graph (from left pane)"},
 			{"l", "Toggle command log"},
 			{"r", "Refresh all data"},

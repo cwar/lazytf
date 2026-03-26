@@ -75,6 +75,12 @@ type Model struct {
 	followOutput     bool              // auto-scroll to follow new streaming output
 	planHighlighter  *ui.PlanHighlighter // stateful plan line highlighter for streaming
 
+	// Stream buffer: preserves command output when user navigates away mid-stream.
+	// cmdStreamLineMsg always writes here; detailLines is the "display" copy.
+	streamLines   []string // raw lines from the current streaming command
+	streamHLLines []string // highlighted lines from the current streaming command
+	viewingStream bool     // true when detail pane is showing the stream output
+
 	// Apply/Destroy result pinning (keeps output visible after completion)
 	applyResult bool // true when showing apply/destroy output; cleared on dismiss or new cmd
 
@@ -378,6 +384,10 @@ func readStreamLine(title string, ch <-chan string, cmdErr *error) tea.Cmd {
 
 // onSelectionChanged updates the detail pane based on current selection.
 func (m *Model) onSelectionChanged() {
+	// When the user navigates to a new selection, they're leaving the
+	// stream view. The buffer is preserved for 'b' key to return to.
+	m.viewingStream = false
+
 	panel := m.panels[m.activePanel]
 	item := panel.SelectedItem()
 

@@ -251,6 +251,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.showHelp = true
 		return m, nil
+	case "b":
+		// Switch back to streaming command output (when a command is running
+		// and user navigated away to browse files/resources).
+		if m.isLoading && !m.viewingStream && len(m.streamLines) > 0 {
+			m.detailLines = m.streamLines
+			m.highlightedLines = m.streamHLLines
+			m.isHighlighted = true
+			// Restore the command title (strip trailing "..." from loadingMsg)
+			title := m.loadingMsg
+			if len(title) > 3 && title[len(title)-3:] == "..." {
+				title = title[:len(title)-3]
+			}
+			m.detailTitle = title
+			m.viewingStream = true
+			m.followOutput = true
+			m.focus = FocusRight
+			// Scroll to bottom to follow live output
+			visH := m.detailVisibleHeight()
+			if len(m.detailLines) > visH {
+				m.detailScroll = len(m.detailLines) - visH
+			} else {
+				m.detailScroll = 0
+			}
+			return m, nil
+		}
 	case "tab":
 		m.nextPanel()
 		m.onSelectionChanged()

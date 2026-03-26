@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -107,8 +108,8 @@ func TestApplyResult_DismissWithQ(t *testing.T) {
 	}
 }
 
-// TestApplyResult_NotSetForPlan verifies that plan commands don't set applyResult
-// (plans enter planReview mode instead).
+// TestApplyResult_NotSetForPlan verifies that successful plan commands don't
+// set applyResult (successful plans enter planReview mode instead).
 func TestApplyResult_NotSetForPlan(t *testing.T) {
 	m := testModel()
 	m.isLoading = true
@@ -119,7 +120,125 @@ func TestApplyResult_NotSetForPlan(t *testing.T) {
 	updated := result.(Model)
 
 	if updated.applyResult {
-		t.Fatal("applyResult should NOT be set for Plan commands")
+		t.Fatal("applyResult should NOT be set for successful Plan commands")
+	}
+}
+
+// TestPlanFailed_OutputPinnedAfterDataReload verifies that when a plan fails,
+// the error output stays visible even when dataLoadedMsg arrives (which
+// normally calls onSelectionChanged and overwrites the detail pane).
+func TestPlanFailed_OutputPinnedAfterDataReload(t *testing.T) {
+	m := testModel()
+	m.isLoading = true
+	m.pendingPlanFile = "/tmp/lazytf-test.tfplan"
+
+	// Simulate streaming plan output that ends in failure
+	m.detailLines = []string{
+		"Refreshing state...",
+		"Error: Invalid provider configuration",
+		"",
+		"  Provider requires region to be set.",
+	}
+	m.highlightedLines = m.detailLines
+
+	doneMsg := cmdDoneMsg{
+		title:    "Plan",
+		err:      errFake("plan failed"),
+		streamed: true,
+	}
+	result, _ := m.Update(doneMsg)
+	updated := result.(Model)
+
+	if !updated.applyResult {
+		t.Fatal("applyResult should be true after Plan fails, so user can see error output")
+	}
+
+	// Now simulate dataLoadedMsg arriving (the data reload)
+	dataMsg := dataLoadedMsg{}
+	result2, _ := updated.Update(dataMsg)
+	updated2 := result2.(Model)
+
+	// The detail pane should still show the error output, NOT be overwritten
+	if !updated2.applyResult {
+		t.Fatal("applyResult should still be true after dataLoadedMsg")
+	}
+	if len(updated2.detailLines) < 2 {
+		t.Fatal("detailLines should still contain plan error output")
+	}
+	if updated2.detailLines[1] != "Error: Invalid provider configuration" {
+		t.Errorf("detail pane was overwritten: got %q", updated2.detailLines[1])
+	}
+}
+
+// TestPlanFailed_DismissWithEsc verifies that pressing esc on a failed plan
+// dismisses the pinned output and returns to normal view.
+func TestPlanFailed_DismissWithEsc(t *testing.T) {
+	m := testModel()
+	m.applyResult = true
+	m.detailLines = []string{"Error: plan failed"}
+	m.detailTitle = "Plan"
+	m.focus = FocusRight
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := result.(Model)
+
+	if updated.applyResult {
+		t.Fatal("applyResult should be false after esc on failed plan")
+	}
+}
+
+// TestPlanFailed_StatusBarShowsError verifies the status message shows
+// failure and dismiss hint when a plan fails.
+func TestPlanFailed_StatusBarShowsError(t *testing.T) {
+	m := testModel()
+	m.isLoading = true
+	m.pendingPlanFile = "/tmp/lazytf-test.tfplan"
+	m.detailLines = []string{"Error: something broke"}
+	m.highlightedLines = m.detailLines
+
+	doneMsg := cmdDoneMsg{
+		title:    "Plan",
+		err:      errFake("plan failed"),
+		streamed: true,
+	}
+	result, _ := m.Update(doneMsg)
+	updated := result.(Model)
+
+	if !strings.Contains(updated.statusMsg, "failed") {
+		t.Errorf("status should mention failure, got: %q", updated.statusMsg)
+	}
+	if !strings.Contains(updated.statusMsg, "esc") {
+		t.Errorf("status should tell user to press esc, got: %q", updated.statusMsg)
+	}
+}
+
+// TestPlanFailed_CleansPlanFile verifies the pending plan file is cleaned up
+// when a plan fails.
+func TestPlanFailed_CleansPlanFile(t *testing.T) {
+	m := testModel()
+	m.isLoading = true
+
+	// Create a real temp file so we can verify cleanup
+	tmpDir := t.TempDir()
+	planFile := tmpDir + "/lazytf-test.tfplan"
+	if err := writeTestFile(planFile, "fake plan"); err != nil {
+		t.Fatal(err)
+	}
+	m.pendingPlanFile = planFile
+
+	m.detailLines = []string{"Error: plan failed"}
+	m.highlightedLines = m.detailLines
+
+	doneMsg := cmdDoneMsg{
+		title:    "Plan",
+		err:      errFake("plan failed"),
+		streamed: true,
+	}
+	result, _ := m.Update(doneMsg)
+	updated := result.(Model)
+
+	if updated.pendingPlanFile != "" {
+		t.Fatal("pendingPlanFile should be cleared after plan failure")
 	}
 }
 
@@ -197,4 +316,9 @@ func TestApplyResult_ScrollingWorks(t *testing.T) {
 	if updated.detailScroll == 0 {
 		t.Fatal("j should scroll down while viewing apply result")
 	}
+}
+
+// writeTestFile is a test helper to create a file with content.
+func writeTestFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0644)
 }
